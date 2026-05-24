@@ -1,0 +1,24 @@
+schema: mac.repository_contract.v1
+project: c26
+platforms:
+  - darwin
+  - linux
+  - wsl2
+toolchain:
+  required_commands:
+    - python3
+    - make
+    - qemu-system-riscv64
+bootstrap:
+  command: make build
+  creates:
+    - build/c26.elf
+test:
+  command: make smoke
+evidence:
+  required:
+    - repo.head_sha
+    - repo.pushed
+    - repo.dirty
+    - repo.files_changed
+    - tests
