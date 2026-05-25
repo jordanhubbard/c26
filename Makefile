@@ -17,7 +17,7 @@ LDFLAGS := -fuse-ld=lld -nostdlib -Wl,-T,src/linker.ld \
 	-Wl,--gc-sections -Wl,--no-relax
 
 SRCS := src/boot.S src/uart.c src/runtime.c src/devices.c src/graphics.c \
-	src/audio.c src/basic.c src/desktop.c src/robot.c src/kernel.c
+	src/audio.c src/basic.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 .PHONY: all build run smoke clean
