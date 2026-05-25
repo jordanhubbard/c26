@@ -1,18 +1,8 @@
-# Agent Instructions
+# Project Instructions for AI Agents
 
-c26 is a freestanding RISC-V project. The target program must remain C and
-assembly only; host scripts may be Python or Make for build and smoke testing.
+This file provides instructions and context for AI coding agents working on this project.
 
-Use non-interactive commands. Validate changes with:
-
-```bash
-make smoke
-```
-
-The initial platform is QEMU `virt` with UART output. Keep hardware features
-demo-safe unless a real emulated device backend is added.
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ccf33ec3 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -46,7 +36,6 @@ bd close <id>         # Complete work
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -60,3 +49,22 @@ bd close <id>         # Complete work
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+
+## Build & Test
+
+_Add your build and test commands here_
+
+```bash
+# Example:
+# npm install
+# npm test
+```
+
+## Architecture Overview
+
+_Add a brief overview of your project architecture_
+
+## Conventions & Patterns
+
+_Add your project-specific conventions here_
