@@ -1,5 +1,11 @@
 LLVM_PREFIX ?= /opt/homebrew/opt/llvm/bin
-CLANG ?= $(LLVM_PREFIX)/clang
+
+# Use Homebrew LLVM clang only if it exists; otherwise fall back to clang on PATH
+ifeq ($(wildcard $(LLVM_PREFIX)/clang),)
+  CLANG ?= clang
+else
+  CLANG ?= $(LLVM_PREFIX)/clang
+endif
 QEMU ?= qemu-system-riscv64
 BUILD := build
 ELF := $(BUILD)/c26.elf
