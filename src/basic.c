@@ -1,34 +1,47 @@
 #include "c26.h"
 
-typedef struct {
-    const char *name;
-    uint64_t value;
-} basic_var_t;
+static uint64_t vars[26];
 
-static basic_var_t vars[8];
-
-static basic_var_t *var_for(const char *name)
+static int var_index(char name)
 {
-    for (size_t i = 0; i < 8; i++) {
-        if (vars[i].name == name || vars[i].name == 0) {
-            vars[i].name = name;
-            return &vars[i];
-        }
+    if (name >= 'a' && name <= 'z') {
+        name -= ('a' - 'A');
     }
-    return &vars[0];
+    if (name < 'A' || name > 'Z') {
+        return -1;
+    }
+    return (int)(name - 'A');
+}
+
+static uint64_t parse_value(const char **cursor)
+{
+    *cursor = c26_skip_spaces(*cursor);
+
+    int index = var_index(**cursor);
+    if (index >= 0) {
+        (*cursor)++;
+        return vars[index];
+    }
+
+    return c26_parse_uint(cursor);
 }
 
 static void run_let(const char *line)
 {
     const char *cursor = c26_skip_spaces(line + 3);
-    const char *name = cursor;
-    while (*cursor != '\0' && *cursor != '=') {
-        cursor++;
+    int index = var_index(*cursor);
+    if (index < 0) {
+        c26_puts("Error: LET variable must be a single letter A-Z\n");
+        return;
     }
-    if (*cursor == '=') {
-        cursor++;
+    cursor++;
+    cursor = c26_skip_spaces(cursor);
+    if (*cursor != '=') {
+        c26_puts("Error: LET missing '='\n");
+        return;
     }
-    var_for(name)->value = c26_parse_uint(&cursor);
+    cursor++;
+    vars[index] = parse_value(&cursor);
 }
 
 static void run_print(const char *line)
@@ -42,11 +55,12 @@ static void run_print(const char *line)
         c26_uart_putc('\n');
         return;
     }
-    uint64_t left = c26_parse_uint(&cursor);
+
+    uint64_t left = parse_value(&cursor);
     cursor = c26_skip_spaces(cursor);
     if (*cursor == '+') {
         cursor++;
-        left += c26_parse_uint(&cursor);
+        left += parse_value(&cursor);
     }
     c26_put_uint(left);
     c26_uart_putc('\n');
@@ -87,14 +101,19 @@ static void run_line(const char *line)
 void c26_basic_demo(void)
 {
     static const char *program[] = {
-        "10 PRINT \"BASIC READY\"",
-        "20 PRINT \"HELLO FROM C26\"",
-        "30 PRINT 20+6",
-        "40 POKE 53280,26",
-        "50 PEEK 53280",
+        "10 LET A=26",
+        "20 PRINT A",
+        "30 PRINT A+16",
+        "40 PRINT \"BASIC READY\"",
+        "50 PRINT \"HELLO FROM C26\"",
+        "60 PRINT 20+6",
+        "70 POKE 53280,26",
+        "80 PEEK 53280",
         0,
     };
-    c26_puts("C26 BASIC V0.1\n");
+
+    c26_puts("C26 BASIC V0.2\n");
+
     for (size_t i = 0; program[i] != 0; i++) {
         c26_puts("] ");
         c26_puts(program[i]);

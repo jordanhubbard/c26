@@ -12,7 +12,10 @@ MARKERS = [
     "C26 RISC-V HOME COMPUTER",
     "C26 DESKTOP",
     "BASIC READY",
-    "ROBOT SDK DEMO",
+    "HELLO FROM C26",
+    "26",
+    "42",
+    "PEEK returned emulated device byte 26",
     "C26 DEMO COMPLETE",
 ]
 
