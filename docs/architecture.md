@@ -6,10 +6,12 @@ QEMU loads `build/c26.elf` at `0x80000000`. `_start` establishes the stack and
 enters `kmain`; the system then owns the hart without firmware or host OS
 services. UART0 at `0x10000000` remains the diagnostic and serial-input path.
 
-The kernel performs a deterministic startup demonstration and then remains in
-an event loop polling UART, virtio input queues, and completed audio periods.
-Polling is intentional for this single-hart version and does not require a PLIC
-or scheduler.
+`src/trap.S` preserves the interrupted register set and enters the M-mode trap
+handler in `src/interrupts.c`. A periodic CLINT interrupt supplies ticks. The
+PLIC routes UART IRQ 10 and virtio IRQs 1-8; UART receive data is buffered by
+its handler and virtio sources are acknowledged before their used rings are
+drained. After servicing application work, the single hart sleeps with `WFI`
+until the next timer or device interrupt.
 
 ## Device transport
 
@@ -23,6 +25,7 @@ The current real emulated backends are:
 
 | Device | Virtio ID | Driver | Behavior |
 | --- | ---: | --- | --- |
+| Block | 2 | `src/block.c` | 512-byte read/write requests and negotiated flush |
 | GPU | 16 | `src/framebuffer.c` | 2D resource, guest backing, scanout, transfer, flush |
 | Keyboard/mouse | 18 | `src/input.c` | Pre-posted event buffers and live event recycling |
 | Sound | 25 | `src/audio.c` | Stream query, parameter negotiation, PCM lifecycle and refill |
@@ -43,7 +46,21 @@ are needed.
 Every virtio input device owns a queue of writable event buffers. Completed
 Linux input events are translated into desktop navigation, relative pointer
 motion, clicks, and BASIC characters. UART input feeds the same BASIC parser.
-The desktop is redrawn and flushed after state changes.
+The desktop is redrawn and flushed after state changes. Its Files application
+reads C26FS directory metadata and shows saved names and sizes.
+
+## Persistent storage
+
+`src/block.c` drives a modern virtio-block queue synchronously during bounded
+filesystem operations. `src/fs.c` owns the native C26FS format: one checksummed
+superblock sector, one checksummed fixed directory, and append-allocated data
+sectors. Twelve files of at most 4096 bytes are supported. Each file has a
+content checksum; overwrites reuse capacity when possible and move to fresh
+sectors when they grow.
+
+BASIC stores up to 64 sorted numbered lines. `SAVE` serializes those lines into
+a C26FS file, while `LOAD` validates and rebuilds the in-memory program. This is
+the only persistence contract—the startup demo itself remains deterministic.
 
 ## Audio
 
@@ -71,7 +88,9 @@ external network that QEMU was not configured to provide.
 
 ## Validation contract
 
-`make smoke` performs a clean build, boots with modern virtio GPU, keyboard,
-mouse, and sound devices, injects live BASIC commands over UART, and requires
-markers from each backend and SDK path. Static boot text alone cannot satisfy
-the gate because the test checks state-changing write/read results.
+`make smoke` builds the image, creates a fresh raw disk, and boots modern virtio
+block, GPU, keyboard, mouse, and sound devices. The first QEMU process verifies
+CLINT/PLIC counters, live device writes, new-file save and overwrite. It is
+terminated completely. A second QEMU process mounts the same disk, loads and
+runs the stored BASIC text. Static boot text or a single-process RAM cache
+cannot satisfy the gate.

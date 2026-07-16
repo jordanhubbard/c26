@@ -93,6 +93,8 @@ int c26_virtio_begin(c26_virtio_device_t *device, uint32_t wanted_low,
     uint32_t accepted_low = offered_low & wanted_low;
     uint32_t accepted_high = (offered_high & wanted_high) |
                              VIRTIO_F_VERSION_1_HIGH;
+    device->features_low = accepted_low;
+    device->features_high = accepted_high;
     mmio_write(base, MMIO_DRIVER_FEATURES_SEL, 0);
     mmio_write(base, MMIO_DRIVER_FEATURES, accepted_low);
     mmio_write(base, MMIO_DRIVER_FEATURES_SEL, 1);

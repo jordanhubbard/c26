@@ -35,6 +35,8 @@ typedef struct {
 typedef struct {
     uintptr_t base;
     uint32_t device_id;
+    uint32_t features_low;
+    uint32_t features_high;
 } c26_virtio_device_t;
 
 typedef struct {

@@ -3,11 +3,15 @@
 #define UART0_BASE 0x10000000UL
 #define UART_THR 0
 #define UART_RBR 0
+#define UART_IER 1
 #define UART_LSR 5
 #define UART_LSR_DR 0x01
 #define UART_LSR_THRE 0x20
 
 static volatile uint8_t *const uart0 = (volatile uint8_t *)UART0_BASE;
+static volatile uint8_t receive_buffer[256];
+static volatile uint16_t receive_head;
+static volatile uint16_t receive_tail;
 
 void c26_uart_putc(char ch)
 {
@@ -21,10 +25,32 @@ void c26_uart_putc(char ch)
 
 int c26_uart_getc_nonblocking(void)
 {
-    if ((uart0[UART_LSR] & UART_LSR_DR) == 0) {
-        return -1;
+    if (receive_tail != receive_head) {
+        uint8_t value = receive_buffer[receive_tail & 0xffU];
+        receive_tail++;
+        return value;
     }
-    return uart0[UART_RBR];
+    if ((uart0[UART_LSR] & UART_LSR_DR) != 0) {
+        return uart0[UART_RBR];
+    }
+    return -1;
+}
+
+void c26_uart_enable_interrupt(void)
+{
+    uart0[UART_IER] = 1;
+}
+
+void c26_uart_handle_interrupt(void)
+{
+    while ((uart0[UART_LSR] & UART_LSR_DR) != 0) {
+        uint8_t value = uart0[UART_RBR];
+        uint16_t next = (uint16_t)(receive_head + 1);
+        if ((uint16_t)(next - receive_tail) <= sizeof(receive_buffer)) {
+            receive_buffer[receive_head & 0xffU] = value;
+            receive_head = next;
+        }
+    }
 }
 
 void c26_puts(const char *text)

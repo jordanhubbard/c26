@@ -1,10 +1,15 @@
 #include "c26.h"
+#include "c26_block.h"
+#include "c26_fs.h"
 
 void kmain(void)
 {
     c26_puts("\nC26 RISC-V HOME COMPUTER\n");
     c26_puts("QEMU virt | rv64imac | freestanding C + assembly\n\n");
 
+    c26_interrupts_init();
+    c26_block_init();
+    c26_fs_init();
     c26_desktop_show();
     c26_graphics_demo();
     c26_audio_demo();
@@ -13,10 +18,15 @@ void kmain(void)
     c26_robot_demo();
 
     c26_puts("C26 DEMO COMPLETE\n");
+    c26_puts("INTERRUPT ACTIVITY: timer=");
+    c26_put_uint(c26_interrupt_ticks());
+    c26_puts(" external=");
+    c26_put_uint(c26_interrupt_external_count());
+    c26_uart_putc('\n');
     c26_puts("C26 INTERACTIVE LOOP ONLINE\n");
 
     for (;;) {
         c26_desktop_poll();
-        __asm__ volatile("nop");
+        c26_idle();
     }
 }

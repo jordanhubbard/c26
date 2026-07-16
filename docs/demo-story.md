@@ -1,31 +1,37 @@
 # c26 Demo Story
 
-This document describes the final fleet demo for the c26 project.
+The demo now follows a complete home-computer workflow rather than a startup
+transcript.
 
-## Slack/Demo Flow
-
-The demo begins with users interacting in Slack to observe real-time system status and logs.
-
-## BASIC Variable Demo
-
-The small BASIC program runs automatically on boot. It demonstrates variable assignment, arithmetic, and output.
-
-## User Commands
-
-Users can run the following commands from the c26 repository root:
+## Run it
 
 ```bash
-make build      # Build the c26 ELF and supporting binaries
-make smoke      # Run the smoke test including the BASIC variable demo
-make run        # Launch the QEMU emulator with the RISC-V ELF
+make smoke      # Automated two-boot persistence and hardware gate
+make run        # Graphical desktop; build/c26.img survives restarts
 ```
 
-Expected behavior:
+## Human flow
 
-1. QEMU boots the standalone RISC-V ELF.
-2. The UART log shows the c26 retro desktop.
-3. The BASIC program runs and prints computed output.
-4. Graphics, audio, USB, I2C, CAN, TCP/IP, and robot SDK demo lines appear.
-5. The smoke test reports `c26 smoke passed`.
+1. QEMU boots the freestanding RV64 image and reports CLINT, PLIC, virtio block,
+   GPU, input, and sound devices online.
+2. The graphical desktop appears. Select **FILES** to see the C26FS browser.
+3. In BASIC, enter a program and persist it:
 
-Please share feedback in Slack on the BASIC interaction, desktop feel, device API names, and which robot SDK examples should come next.
+   ```text
+   ] NEW
+   ] 10 PRINT "C26 REMEMBERS"
+   ] 20 PRINT 20+6
+   ] LIST
+   ] RUN
+   ] SAVE DEMO
+   ] DIR
+   ```
+
+4. Restart `make run`, then enter `LOAD DEMO` and `RUN`. The program comes from
+   the virtio disk, not retained RAM.
+5. Select **FILES** again; `DEMO` and its byte size are visible in the desktop.
+
+The startup still demonstrates graphics, ray tracing, PCM sound, device
+registers, I2C, CAN, packet loopback, and the robot SDK. The new persistence
+path turns those facilities into an interrupt-driven computer users can program
+and return to later.
