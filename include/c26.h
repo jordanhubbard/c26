@@ -4,8 +4,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+#include <string.h> /* host test builds use libc */
+#else
 void *memcpy(void *destination, const void *source, size_t length);
 void *memset(void *destination, int value, size_t length);
+#endif
 
 void c26_uart_putc(char ch);
 int c26_uart_getc_nonblocking(void);

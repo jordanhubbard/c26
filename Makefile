@@ -15,9 +15,11 @@ DISK := $(BUILD)/c26.img
 
 CFLAGS := --target=riscv64-unknown-elf -march=rv64imac -mabi=lp64 \
 	-mcmodel=medany -ffreestanding -fno-builtin -fno-stack-protector \
-	-O2 -g -Wall -Wextra -Iinclude
+	-O2 -g -Wall -Wextra -Iinclude -MMD -MP
 LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,src/linker.ld \
 	-Wl,--gc-sections -Wl,--no-relax
+HOSTCC ?= cc
+HOSTCFLAGS := -O1 -g -Wall -Wextra -Iinclude -Itests
 
 SRCS := src/boot.S src/trap.S src/user_stubs.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/input.c src/devices.c src/graphics.c \
 	src/audio.c src/basic.c src/cart.c src/vm.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
@@ -35,11 +37,31 @@ QEMU_DEVICES := -device virtio-gpu-device -device virtio-keyboard-device \
 	-drive if=none,format=raw,file=$(DISK),id=c26disk \
 	-device virtio-blk-device,drive=c26disk
 
-.PHONY: all build carts disk run run-headless smoke clean
+.PHONY: all build carts disk run run-headless smoke test check compdb clean
 
-all: build carts
+all: build carts compdb
 
 build: $(ELF)
+
+# Host-side unit tests: the BASIC interpreter and C26FS compile unmodified
+# on the host against shims, so logic bugs surface without a QEMU boot.
+TEST_BINS := $(BUILD)/host/test_basic $(BUILD)/host/test_fs
+
+$(BUILD)/host/test_%: tests/test_%.c tests/host_shim.c tests/host_shim.h $(wildcard src/*.c include/*.h)
+	mkdir -p $(BUILD)/host
+	$(HOSTCC) $(HOSTCFLAGS) $< tests/host_shim.c -o $@
+
+test: $(TEST_BINS)
+	@set -e; for t in $(TEST_BINS); do echo "== $$t"; $$t; done
+
+# The one gate: everything the machine claims, verified.
+check: build carts test smoke
+
+# compile_commands.json for clangd/IDE tooling.
+compdb: $(ELF)
+	@echo '[' > compile_commands.json
+	@cat $(BUILD)/*.o.json >> compile_commands.json 2>/dev/null || true
+	@echo '{}]' >> compile_commands.json
 
 carts: $(CARTS)
 
@@ -50,11 +72,13 @@ $(BUILD):
 
 $(BUILD)/%.c.o: src/%.c
 	mkdir -p $(dir $@)
-	$(CLANG) $(CFLAGS) -c $< -o $@
+	$(CLANG) $(CFLAGS) -MJ $@.json -c $< -o $@
 
 $(BUILD)/%.S.o: src/%.S
 	mkdir -p $(dir $@)
 	$(CLANG) $(CFLAGS) -c $< -o $@
+
+-include $(OBJS:.o=.d)
 
 $(ELF): $(OBJS)
 	$(CLANG) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@

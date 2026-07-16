@@ -2,3 +2,4 @@ build/
 .mac/*.db*
 .tickets/
 .codegraph/
+compile_commands.json
