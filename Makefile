@@ -19,13 +19,14 @@ CFLAGS := --target=riscv64-unknown-elf -march=rv64imac -mabi=lp64 \
 LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,src/linker.ld \
 	-Wl,--gc-sections -Wl,--no-relax
 
-SRCS := src/boot.S src/trap.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/input.c src/devices.c src/graphics.c \
-	src/audio.c src/basic.c src/cart.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
+SRCS := src/boot.S src/trap.S src/user_stubs.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/input.c src/devices.c src/graphics.c \
+	src/audio.c src/basic.c src/cart.c src/vm.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
 	-Wl,--no-relax
-CARTS := $(BUILD)/paint.cart
+CART_NAMES := paint crash spin
+CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
 QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M
 QEMU_BOOT := -bios none -no-reboot -kernel $(ELF)
@@ -58,8 +59,8 @@ $(BUILD)/%.S.o: src/%.S
 $(ELF): $(OBJS)
 	$(CLANG) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
 
-$(BUILD)/paint.elf: apps/crt0.S apps/paint/paint.c apps/cart.ld include/c26_api.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $(CART_LDFLAGS) apps/crt0.S apps/paint/paint.c -o $@
+$(BUILD)/%.elf: apps/%/main.c apps/crt0.S apps/cart.ld include/c26_api.h | $(BUILD)
+	$(CLANG) $(CFLAGS) $(CART_LDFLAGS) apps/crt0.S $< -o $@
 
 $(BUILD)/%.cart: $(BUILD)/%.elf
 	$(OBJCOPY) -O binary $< $@

@@ -94,11 +94,29 @@ gate has each implementation read what the other wrote.
 linked at `0x88000000`, starting with a validated header, entered as
 `int app_main(const c26_api_t *api)`. The API vector table exposes console,
 input (keys, mouse, break), time, framebuffer primitives, audio voices,
-C26FS, and device registers. `src/cart.c` loads the file from C26FS, zeroes
-bss, executes `fence.i`, and calls the entry; `RUN "NAME"` in BASIC launches
-it. Version 1 is deliberately unprotected and cooperative — apps run in
-M-mode on the kernel stack and poll `stop_requested()`; process isolation is
-the next milestone, not an accident this one forgot.
+C26FS, and device registers. `RUN "NAME"` in BASIC launches it.
+
+## Protection
+
+The kernel stays in M-mode; cartridges execute in U-mode under Sv39. Before
+entry, `src/cart.c` builds an address space (`src/vm.c`) that identity-maps
+only what belongs to the app: its 2 MiB load region, a private 64 KiB stack,
+the framebuffer surface, one scratch page, and a single read/execute page of
+syscall stubs. Kernel memory and MMIO are simply absent. The `c26_api_t`
+pointers land in the stub page, which raises `ecall`s — the syscall numbers
+in `include/c26_user.h` are the entire kernel surface, and every pointer
+argument is validated against the mapped regions.
+
+`src/trap.S` discriminates trap origin via `mscratch`: kernel traps use the
+old path, user traps save the full register file into a frame, switch to the
+kernel stack, and dispatch (`c26_trap_handler_user` in `src/cart.c`). On
+every timer or device interrupt the kernel pumps I/O and audio, so a
+spinning app cannot starve the machine, and Ctrl-C terminates it
+preemptively. A fault (wild pointer, illegal instruction) prints the cause
+and kills the process; the console returns and the machine keeps working.
+`apps/crash` and `apps/spin` exist to prove both properties in the smoke
+gate. One process runs at a time; a scheduler and IPC arrive with the
+compositor, when multiple apps first exist to schedule.
 
 BASIC stores up to 256 sorted numbered lines of 80 characters. `SAVE`
 serializes those lines into a C26FS file, while `LOAD` validates and rebuilds

@@ -4,6 +4,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import re
+import time
 from pathlib import Path
 
 
@@ -54,9 +55,9 @@ FIRST_BOOT_MARKERS = [
 ]
 
 SECOND_BOOT_MARKERS = [
-    # DEMO + BOOT written by the guest, PAINT installed host-side between
-    # boots — proving fsinstall.py can modify a guest-formatted filesystem.
-    "C26FS: mounted 3 file(s)",
+    # DEMO + BOOT written by the guest, PAINT/CRASH/SPIN installed host-side
+    # between boots — fsinstall.py modifying a guest-formatted filesystem.
+    "C26FS: mounted 5 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -67,6 +68,17 @@ SECOND_BOOT_MARKERS = [
     "PAINT CART ONLINE",
     "PAINT CART EXIT",
     "CART EXIT 0",
+    # Protection: a wild write to kernel memory faults and is contained...
+    "CRASH CART ONLINE",
+    "CART FAULT cause=",
+    "CART EXIT -1",
+    "333",
+    # ...and a hung cartridge is preemptively killed by Ctrl-C. After each,
+    # the machine keeps answering.
+    "SPIN CART ONLINE",
+    "CART KILLED",
+    "CART EXIT -3",
+    "888",
 ]
 
 FIRST_BOOT_INPUT = """\
@@ -119,16 +131,26 @@ delete temp2
 dir
 """
 
-SECOND_BOOT_INPUT = """\
-load boot
-list
-run
-load demo
-run
-dir
-run "paint"
-q
-"""
+# Ctrl-C is a real-time signal, not a queued character: it kills whichever
+# cartridge is running when it arrives. The second boot therefore feeds its
+# input in stages, sending \x03 only once SPIN is definitely running.
+SECOND_BOOT_STAGES = [
+    (
+        'load boot\n'
+        'list\n'
+        'run\n'
+        'load demo\n'
+        'run\n'
+        'dir\n'
+        'run "paint"\n'
+        'q\n'
+        'run "crash"\n'
+        'print 111+222\n'
+        'run "spin"\n',
+        30.0,
+    ),
+    ('\x03print 999-111\n', 10.0),
+]
 
 
 def run(
@@ -197,6 +219,28 @@ def boot(input_text: str, timeout: float) -> str:
         return stdout + stderr
 
 
+def boot_staged(stages: list[tuple[str, float]]) -> str:
+    process = subprocess.Popen(
+        qemu_command(),
+        cwd=str(ROOT),
+        text=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        for text, delay in stages:
+            process.stdin.write(text)
+            process.stdin.flush()
+            time.sleep(delay)
+    except BrokenPipeError:
+        pass
+    process.kill()
+    output = process.stdout.read() if process.stdout else ""
+    process.wait()
+    return output
+
+
 def require_markers(output: str, markers: list[str], boot_name: str) -> bool:
     missing = [marker for marker in markers if marker not in output]
     if not missing:
@@ -246,20 +290,21 @@ def main() -> int:
         return 1
 
     install = run(["python3", "scripts/fsinstall.py", str(DISK),
-                   "PAINT=build/paint.cart"])
+                   "PAINT=build/paint.cart", "CRASH=build/crash.cart",
+                   "SPIN=build/spin.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
         sys.stderr.write("\nfsinstall could not modify the guest-formatted disk\n")
         return 1
 
-    second_output = boot(SECOND_BOOT_INPUT, timeout=45.0)
+    second_output = boot_staged(SECOND_BOOT_STAGES)
     if not require_markers(second_output, SECOND_BOOT_MARKERS, "second-boot"):
         return 1
 
-    print("c26 smoke passed: language, graphics, sound, C26FS v2 "
-          "delete/rename, two-boot persistence, and a host-built cartridge "
-          "loaded and executed from disk")
+    print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "
+          "persistence, and U-mode cartridges — clean run, contained kernel-"
+          "memory fault, and preemptive kill of a hung app")
     return 0
 
 

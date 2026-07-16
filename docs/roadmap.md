@@ -24,13 +24,21 @@ C26FS v2 (64 files, 128 KiB, free-sector bitmap, DELETE/RENAME), the frozen
 `scripts/fsinstall.py`, and `apps/paint` as the first out-of-tree program.
 Version 1 is cooperative and unprotected by design.
 
+## Delivered: M3 — protection (2026-07-17)
+
+Cartridges now run in U-mode inside per-app Sv39 address spaces built by
+src/vm.c, reached only through the 25-syscall surface in c26_user.h (the
+c26_api_t contract is unchanged — its pointers land in a user-mapped stub
+page). The M-mode kernel keeps ownership on every interrupt: input and audio
+survive a spinning app, Ctrl-C kills it, and a wild pointer faults the app
+while the machine keeps answering. apps/crash and apps/spin prove both in
+the smoke gate. Single-process by design at this stage.
+
 ## Remaining course (in priority order)
 
-- **M3 — Protection.** S-mode kernel, Sv39 address spaces, user-mode
-  processes, a one-screen syscall surface, preemptive scheduling, IPC. The
-  qualitative leap 50 years buys: a crashing app no longer takes the machine.
-- **M4 — Compositor.** Per-app shared-memory surfaces, z-order, focus
-  routing; the desktop becomes real windows.
+- **M4 — Compositor + multiprocessing.** Per-app shared-memory surfaces,
+  z-order, focus routing — and with multiple live apps, the scheduler and
+  IPC deferred from M3.
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.
 - **M6 — App suite + networking.** virtio-net with a minimal honest IP

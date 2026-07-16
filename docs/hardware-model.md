@@ -27,6 +27,7 @@ replacing magic memory addresses with typed SDK calls.
 | Interrupts | CLINT timer and PLIC-routed UART/virtio IRQs; WFI idle |
 | Storage | 8 MiB virtio-block disk; C26FS v2: 64 files, 128 KiB, delete/rename |
 | Cartridges | Flat RV64 binaries from C26FS via the c26_api.h vector table |
+| Protection | U-mode + Sv39 per cartridge; 25-syscall surface; preemptive kill |
 | Display | 640x480x32 software surface on a virtio-GPU scanout |
 | Console | 100x45 scrolling text console, printable-ASCII 5x7 font |
 | 2D/3D | Pixel primitives, text, depth-tested colored triangles |

@@ -1,4 +1,5 @@
 #include "c26.h"
+#include "c26_user.h"
 
 #define CLINT_BASE 0x02000000UL
 #define CLINT_MTIMECMP (CLINT_BASE + 0x4000UL)
@@ -31,7 +32,17 @@ static uint64_t read_mcause(void)
     return value;
 }
 
-static void handle_external_interrupt(void)
+void c26_timer_interrupt(void)
+{
+    timer_ticks++;
+    uint64_t now = *(volatile uint64_t *)CLINT_MTIME;
+    do {
+        next_timer += TIMER_INTERVAL;
+    } while (next_timer <= now);
+    *(volatile uint64_t *)CLINT_MTIMECMP = next_timer;
+}
+
+void c26_external_interrupt(void)
 {
     volatile uint32_t *claim = (volatile uint32_t *)PLIC_CLAIM;
     for (;;) {
@@ -70,20 +81,21 @@ void c26_trap_handler(void)
     }
     cause &= ~MCAUSE_INTERRUPT;
     if (cause == MCAUSE_MACHINE_TIMER) {
-        timer_ticks++;
-        uint64_t now = *(volatile uint64_t *)CLINT_MTIME;
-        do {
-            next_timer += TIMER_INTERVAL;
-        } while (next_timer <= now);
-        *(volatile uint64_t *)CLINT_MTIMECMP = next_timer;
+        c26_timer_interrupt();
     } else if (cause == MCAUSE_MACHINE_EXTERNAL) {
-        handle_external_interrupt();
+        c26_external_interrupt();
     }
 }
 
 void c26_interrupts_init(void)
 {
     __asm__ volatile("csrw mtvec, %0" :: "r"(c26_trap_entry));
+    __asm__ volatile("csrw mscratch, zero");
+
+    /* PMP: without a matching entry, U-mode accesses fault regardless of
+       page tables. Grant everything here; Sv39 is the real isolation. */
+    __asm__ volatile("csrw pmpaddr0, %0" :: "r"(~0UL >> 10));
+    __asm__ volatile("csrw pmpcfg0, %0" :: "r"(0x1fUL));
 
     for (uint32_t source = 1; source <= 10; source++) {
         *(volatile uint32_t *)(PLIC_BASE + source * 4U) = 1;

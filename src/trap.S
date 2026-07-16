@@ -1,8 +1,18 @@
+#include "c26_user.h"
+
+/* Trap entry for both worlds. mscratch is the discriminator: it holds the
+ * user frame pointer while executing in U-mode and zero while in the
+ * kernel. Offsets into the frame come from c26_user.h. */
+
     .section .text
     .align 4
     .globl c26_trap_entry
 
 c26_trap_entry:
+    csrrw sp, mscratch, sp
+    bnez sp, trap_from_user
+    /* Kernel trap: restore sp and use the interrupted kernel stack. */
+    csrrw sp, mscratch, sp
     addi sp, sp, -256
     sd ra,   0(sp)
     sd gp,   8(sp)
@@ -67,3 +77,135 @@ c26_trap_entry:
     ld t6, 232(sp)
     addi sp, sp, 256
     mret
+
+trap_from_user:
+    /* sp = frame pointer; every other register is live user state. */
+    sd x1,   8(sp)
+    sd x3,  24(sp)
+    sd x4,  32(sp)
+    sd x5,  40(sp)
+    sd x6,  48(sp)
+    sd x7,  56(sp)
+    sd x8,  64(sp)
+    sd x9,  72(sp)
+    sd x10, 80(sp)
+    sd x11, 88(sp)
+    sd x12, 96(sp)
+    sd x13, 104(sp)
+    sd x14, 112(sp)
+    sd x15, 120(sp)
+    sd x16, 128(sp)
+    sd x17, 136(sp)
+    sd x18, 144(sp)
+    sd x19, 152(sp)
+    sd x20, 160(sp)
+    sd x21, 168(sp)
+    sd x22, 176(sp)
+    sd x23, 184(sp)
+    sd x24, 192(sp)
+    sd x25, 200(sp)
+    sd x26, 208(sp)
+    sd x27, 216(sp)
+    sd x28, 224(sp)
+    sd x29, 232(sp)
+    sd x30, 240(sp)
+    sd x31, 248(sp)
+    csrrw t0, mscratch, zero    /* t0 = user sp; kernel mode marked */
+    sd t0, 16(sp)
+    csrr t0, mepc
+    sd t0, C26_FRAME_MEPC(sp)
+    mv a0, sp
+    ld sp, C26_FRAME_KSP(a0)
+    call c26_trap_handler_user
+    /* Resume the (single) user frame. */
+    la t6, c26_user_frame
+    ld t0, C26_FRAME_MEPC(t6)
+    csrw mepc, t0
+    csrw mscratch, t6
+    ld x1,   8(t6)
+    ld x2,  16(t6)
+    ld x3,  24(t6)
+    ld x4,  32(t6)
+    ld x5,  40(t6)
+    ld x6,  48(t6)
+    ld x7,  56(t6)
+    ld x8,  64(t6)
+    ld x9,  72(t6)
+    ld x10, 80(t6)
+    ld x11, 88(t6)
+    ld x12, 96(t6)
+    ld x13, 104(t6)
+    ld x14, 112(t6)
+    ld x15, 120(t6)
+    ld x16, 128(t6)
+    ld x17, 136(t6)
+    ld x18, 144(t6)
+    ld x19, 152(t6)
+    ld x20, 160(t6)
+    ld x21, 168(t6)
+    ld x22, 176(t6)
+    ld x23, 184(t6)
+    ld x24, 192(t6)
+    ld x25, 200(t6)
+    ld x26, 208(t6)
+    ld x27, 216(t6)
+    ld x28, 224(t6)
+    ld x29, 232(t6)
+    ld x30, 240(t6)
+    ld x31, 248(t6)
+    mret
+
+    /* long c26_user_enter(frame): save kernel context, drop to U-mode.
+     * Returns only when c26_user_terminate restores this context. */
+    .globl c26_user_enter
+c26_user_enter:
+    sd ra,  (C26_FRAME_KCTX + 0)(a0)
+    sd sp,  (C26_FRAME_KCTX + 8)(a0)
+    sd s0,  (C26_FRAME_KCTX + 16)(a0)
+    sd s1,  (C26_FRAME_KCTX + 24)(a0)
+    sd s2,  (C26_FRAME_KCTX + 32)(a0)
+    sd s3,  (C26_FRAME_KCTX + 40)(a0)
+    sd s4,  (C26_FRAME_KCTX + 48)(a0)
+    sd s5,  (C26_FRAME_KCTX + 56)(a0)
+    sd s6,  (C26_FRAME_KCTX + 64)(a0)
+    sd s7,  (C26_FRAME_KCTX + 72)(a0)
+    sd s8,  (C26_FRAME_KCTX + 80)(a0)
+    sd s9,  (C26_FRAME_KCTX + 88)(a0)
+    sd s10, (C26_FRAME_KCTX + 96)(a0)
+    sd s11, (C26_FRAME_KCTX + 104)(a0)
+    sd sp,  C26_FRAME_KSP(a0)
+    /* mstatus: previous privilege U, previous interrupt-enable on. */
+    li t0, (3 << 11)
+    csrc mstatus, t0
+    li t0, (1 << 7)
+    csrs mstatus, t0
+    ld t0, C26_FRAME_MEPC(a0)
+    csrw mepc, t0
+    csrw mscratch, a0
+    mv t6, a0
+    ld x1,   8(t6)
+    ld x2,  16(t6)
+    ld x10, 80(t6)
+    ld x31, 248(t6)
+    mret
+
+    /* void c26_user_terminate(frame, code): unwind to c26_user_enter. */
+    .globl c26_user_terminate
+c26_user_terminate:
+    csrw mscratch, zero
+    ld ra,  (C26_FRAME_KCTX + 0)(a0)
+    ld sp,  (C26_FRAME_KCTX + 8)(a0)
+    ld s0,  (C26_FRAME_KCTX + 16)(a0)
+    ld s1,  (C26_FRAME_KCTX + 24)(a0)
+    ld s2,  (C26_FRAME_KCTX + 32)(a0)
+    ld s3,  (C26_FRAME_KCTX + 40)(a0)
+    ld s4,  (C26_FRAME_KCTX + 48)(a0)
+    ld s5,  (C26_FRAME_KCTX + 56)(a0)
+    ld s6,  (C26_FRAME_KCTX + 64)(a0)
+    ld s7,  (C26_FRAME_KCTX + 72)(a0)
+    ld s8,  (C26_FRAME_KCTX + 80)(a0)
+    ld s9,  (C26_FRAME_KCTX + 88)(a0)
+    ld s10, (C26_FRAME_KCTX + 96)(a0)
+    ld s11, (C26_FRAME_KCTX + 104)(a0)
+    mv a0, a1
+    ret

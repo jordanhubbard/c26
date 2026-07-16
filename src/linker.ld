@@ -10,6 +10,11 @@ SECTIONS
     *(.text .text.*)
   }
 
+  /* One page of syscall stubs mapped into user address spaces. */
+  .user_stubs : ALIGN(4K) {
+    KEEP(*(.user_stubs))
+  }
+
   .rodata : ALIGN(4K) {
     *(.rodata .rodata.*)
   }

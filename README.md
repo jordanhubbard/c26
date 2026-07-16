@@ -20,6 +20,12 @@ host operating system.
   tree against the frozen `include/c26_api.h` vector table and launched with
   `RUN "NAME"`. `apps/paint` ships as the first cartridge (mouse draws, 1-8
   pick colors); `scripts/fsinstall.py` installs cartridges from the host.
+- Memory protection: cartridges run in U-mode inside their own Sv39 address
+  space, reaching the machine only through a 25-entry syscall table backed
+  by a user-mapped stub page — the `c26_api_t` contract is unchanged. A wild
+  pointer faults and kills the app, not the machine; the timer preempts, so
+  input and audio stay alive under a spinning app and Ctrl-C kills it
+  (`apps/crash` and `apps/spin` prove both in the smoke gate).
 - 640x480 32-bit virtio-GPU scanout with software-buffer fallback, rendering
   a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with
