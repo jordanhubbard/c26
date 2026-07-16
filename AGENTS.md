@@ -12,51 +12,45 @@ make smoke
 The initial platform is QEMU `virt` with UART output. Keep hardware features
 demo-safe unless a real emulated device backend is added.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ccf33ec3 -->
-## Beads Issue Tracker
+## MAC Task Ledger
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
+Issues live in the MAC hub task ledger under project `c26`. MAC is implemented
+in `~/Src/mac`; use its current source CLI when a globally installed `mac`
+binary may be stale:
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+~/Src/mac/.venv/bin/mac task ready --project c26 --limit 10
+~/Src/mac/.venv/bin/mac task show <task_id>
+~/Src/mac/.venv/bin/mac task create "title" --project c26 --description-file=-
+~/Src/mac/.venv/bin/mac task close <task_id> --reason="..."
 ```
 
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+- Use `mac task` for all project tracking. Do not create Beads/Dolt state or a
+  markdown TODO ledger.
+- `.tickets/` is ignored compatibility state, not a source of truth; do not
+  create or commit it during normal work.
+- Use `mac memory remember <key> "<content>" --project=c26` for durable project
+  knowledge when explicitly needed.
+- Keep the c26 project active and let the fleet claim dispatchable tasks. Use
+  `--no-dispatch` only when intentionally staging work.
 
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+Work is not complete until `git push` succeeds.
 
-**MANDATORY WORKFLOW:**
+1. File follow-up issues with `mac task create --project=c26`.
+2. Run `make smoke` when code or build behavior changed.
+3. Close finished work with `mac task close`.
+4. Commit and push:
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd dolt push
    git push
-   git status  # MUST show "up to date with origin"
+   git status  # must show up to date with origin
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-<!-- END BEADS INTEGRATION -->
+5. Clear stashes and inspect managed task refs with
+   `~/Src/mac/.venv/bin/mac repo refs status`.
+6. Verify all changes are committed and pushed, then hand off context.
+
+Never leave work merely “ready to push”; resolve push failures and retry.
