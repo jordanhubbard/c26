@@ -1,5 +1,6 @@
 #include "c26.h"
 #include "c26_block.h"
+#include "c26_console.h"
 #include "c26_fs.h"
 
 void kmain(void)
@@ -10,20 +11,23 @@ void kmain(void)
     c26_interrupts_init();
     c26_block_init();
     c26_fs_init();
-    c26_desktop_show();
+    c26_desktop_init();
     c26_graphics_demo();
     c26_audio_demo();
     c26_devices_demo();
-    c26_basic_demo();
     c26_robot_demo();
 
-    c26_puts("C26 DEMO COMPLETE\n");
+    c26_puts("C26 HARDWARE ONLINE\n");
     c26_puts("INTERRUPT ACTIVITY: timer=");
     c26_put_uint(c26_interrupt_ticks());
     c26_puts(" external=");
     c26_put_uint(c26_interrupt_external_count());
-    c26_uart_putc('\n');
+    c26_putc('\n');
+
     c26_puts("C26 INTERACTIVE LOOP ONLINE\n");
+    c26_screen_set_mode(C26_SCREEN_CONSOLE);
+    c26_basic_init();
+    c26_console_flush();
 
     for (;;) {
         c26_desktop_poll();

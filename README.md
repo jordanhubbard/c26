@@ -1,10 +1,11 @@
 # c26
 
 c26 is an instant-on RISC-V home computer for 2026. It boots directly on
-QEMU `virt`, presents a graphical desktop, accepts keyboard and mouse input,
-runs an interactive persistent BASIC environment, and exposes C SDKs for
-graphics, audio, storage, devices, networking, and robots. The target image is
-freestanding C and assembly with no host operating system.
+QEMU `virt` into a full-screen BASIC console on its own display, runs a real
+line-numbered BASIC with expressions, control flow, and hardware statements,
+persists programs to disk, and exposes C SDKs for graphics, audio, storage,
+devices, and robots. The target image is freestanding C and assembly with no
+host operating system.
 
 ## Implemented system
 
@@ -12,26 +13,33 @@ freestanding C and assembly with no host operating system.
   interrupts, and an idle loop that sleeps with `WFI`.
 - Modern virtio-MMIO transport shared by block, GPU, input, and sound drivers.
 - A persistent 2 MiB raw virtio-block disk containing bounded, checksummed
-  C26FS files. New disks format automatically and existing disks mount at boot.
-- 640x480 32-bit virtio-GPU scanout with software-buffer fallback.
-- Interactive graphical desktop with keyboard selection, mouse pointer, and
-  launchable BASIC, file-browser, robot, network, and device applications.
+  C26FS files. New disks format automatically, existing disks mount at boot,
+  and a fresh machine installs a `DEMO` program written in BASIC.
+- 640x480 32-bit virtio-GPU scanout with software-buffer fallback, rendering
+  a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
+- The machine boots to the BASIC console; Esc opens a desktop launcher with
+  keyboard selection, mouse pointer, and BASIC, file-browser, robot, network,
+  and device applications.
+- C26 BASIC V3: signed 64-bit expressions with precedence, parentheses,
+  comparisons, `AND`/`OR`/`NOT`/`MOD`; `IF...THEN`, `GOTO`, `GOSUB`/`RETURN`,
+  `FOR`/`NEXT`/`STEP`, `END`, `REM`; `INPUT`, `GET`, `PAUSE`; functions
+  `RND`, `ABS`, `PEEK`, `TI`, `FB`. Ctrl-C (serial) or Esc (keyboard) breaks
+  a running program.
+- BASIC hardware statements over the SDKs: `SCREEN`, `CLS`, `COLOR` (C64
+  palette or 24-bit RGB), `PLOT`, `LINE`, `RECT`, `TEXT`, `SOUND`, `DEVICE
+  READ/WRITE`, `ROBOT`, plus `PEEK`/`POKE` compatibility aliases.
+- `LIST`, `RUN`, `NEW`, `DIR`, `SAVE`, `LOAD` manage stored programs (256
+  lines of 80 characters).
 - `c26_gl`-style software 3D SDK with filled triangles, color interpolation,
-  and a depth buffer.
-- CPU ray tracer used for the two-sphere desktop demonstration.
+  a depth buffer, and a CPU ray tracer.
 - Eight-voice, 48 kHz stereo audio mixer with waveforms, pan, envelopes, and a
   continuously refilled virtio-sound PCM stream.
-- Interactive BASIC input over UART or virtio-keyboard. Numbered lines form a
-  stored program; `LIST`, `RUN`, `NEW`, `DIR`, `SAVE`, and `LOAD` manage it.
-  Immediate `PRINT`, `LET`, device commands, `PEEK`, and `POKE` remain
-  available. PEEK/POKE are compatibility aliases implemented through the
-  device API.
 - Stateful I2C register, CAN frame, and packet-loopback APIs, plus a robot SDK
   that uses I2C sensors and CAN motor commands.
 
 The public SDK surfaces are in `include/c26_graphics.h`,
 `include/c26_audio.h`, `include/c26_input.h`, `include/c26_block.h`,
-`include/c26_fs.h`, and `include/c26_devices.h`.
+`include/c26_fs.h`, `include/c26_console.h`, and `include/c26_devices.h`.
 
 ## Build and run
 
@@ -43,21 +51,24 @@ Requirements:
 - Python 3 and Make.
 
 ```bash
-make smoke          # Full headless hardware and interaction gate
+make smoke          # Full headless hardware, language, and persistence gate
 make run            # Graphical QEMU desktop with host audio
 make run-headless   # UART console and dummy audio backend
 ```
 
 `make run` and `make run-headless` preserve the guest disk at
-`build/c26.img`. Delete that image to start with a blank computer. Inside BASIC:
+`build/c26.img`. Delete that image to start with a blank computer. Inside
+BASIC:
 
 ```text
-] NEW
-] 10 PRINT "HELLO TOMORROW"
-] SAVE HELLO
-] LOAD HELLO
-] LIST
+] LOAD DEMO
 ] RUN
+] NEW
+] 10 FOR I=1 TO 5
+] 20 PRINT I*I
+] 30 NEXT
+] RUN
+] SAVE SQUARES
 ```
 
 QEMU's RISC-V virt machine defaults its MMIO transports to the legacy
@@ -70,11 +81,13 @@ custom QEMU invocations must also pass:
 
 ## Controls
 
-- Arrow keys select a desktop application.
-- Enter launches the selected application.
-- Mouse movement and left-click move the pointer and select applications.
-- BASIC accepts commands from either the graphical virtio keyboard or the
-  serial terminal.
+- The machine boots into the BASIC console; type on the virtio keyboard or
+  the serial terminal.
+- Esc opens the desktop launcher (arrows or mouse select, Enter launches,
+  Esc returns to BASIC).
+- Ctrl-C (serial) or Esc (keyboard) interrupts a running BASIC program.
+- `SCREEN 1` switches to the graphics screen for `PLOT`/`LINE`/`RECT`/`TEXT`;
+  `SCREEN 0` returns to the console.
 - The Files application lists persisted program names and sizes from C26FS.
 
 ## Backend boundaries
@@ -85,3 +98,9 @@ The I2C, CAN, and packet SDKs are deterministic in-kernel fabrics intended for
 safe demos; they do not claim to communicate with physical buses or an external
 network. The 3D and ray-tracing paths run on the RISC-V CPU, which keeps their
 behavior available without a host graphics API.
+
+## Course
+
+`docs/roadmap.md` records the forward course: honest virtio-net networking,
+C26FS growth, user C program loading, host-side unit tests, and BASIC string
+variables with a full-screen editor.

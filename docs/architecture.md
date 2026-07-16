@@ -41,13 +41,40 @@ z-buffered triangle rasterization, interpolated vertex colors, a projected cube,
 and an integer ray-sphere renderer. No host OpenGL calls or floating-point ABI
 are needed.
 
-## Input and desktop
+## Console, input, and desktop
+
+`src/console.c` owns a 100x45 cell text console rendered onto the software
+framebuffer with a full printable-ASCII 5x7 font (`src/framebuffer.c`). All
+terminal output (`c26_puts` and friends) writes both the UART and the console
+cells, so the serial stream and the display always agree; presentation is
+throttled to one full-screen GPU transfer per few timer ticks. The machine has
+three screen modes: CONSOLE (default at boot), DESKTOP (launcher), and GFX
+(BASIC graphics screen).
 
 Every virtio input device owns a queue of writable event buffers. Completed
-Linux input events are translated into desktop navigation, relative pointer
-motion, clicks, and BASIC characters. UART input feeds the same BASIC parser.
-The desktop is redrawn and flushed after state changes. Its Files application
-reads C26FS directory metadata and shows saved names and sizes.
+Linux input events are translated per mode: console keys feed BASIC, Esc
+toggles the desktop, desktop arrows/mouse/Enter select and launch
+applications. UART input feeds the same BASIC parser through an
+interrupt-driven ring with real backpressure — when buffers fill, the RX
+interrupt is masked and QEMU withholds delivery rather than bytes being
+dropped. The Files application reads C26FS directory metadata and shows saved
+names and sizes.
+
+## BASIC
+
+`src/basic.c` implements C26 BASIC V3: a recursive-descent expression
+evaluator over signed 64-bit integers (`+ - * / MOD`, parentheses,
+comparisons, `AND`/`OR`/`NOT`, functions `RND`, `ABS`, `PEEK`, `TI`, `FB`),
+a program-counter run engine (`IF...THEN`, `GOTO`, `GOSUB`/`RETURN`,
+`FOR`/`NEXT`/`STEP`, `END`), blocking interaction (`INPUT`, `GET`, `PAUSE`)
+that keeps pumping I/O and audio while it waits, and hardware statements
+(`SCREEN`, `CLS`, `COLOR`, `PLOT`, `LINE`, `RECT`, `TEXT`, `SOUND`,
+`DEVICE`, `ROBOT`) that wrap the C SDKs. During RUN, typed characters queue
+for `GET`/`INPUT` and Ctrl-C or Esc raises a break; leftover type-ahead
+returns to the line editor when the program ends. The `FB` function returns a
+checksum of the framebuffer so graphics output is verifiable headlessly. A
+fresh filesystem gets a `DEMO` program — the boot demo is written in the
+machine's own language.
 
 ## Persistent storage
 
@@ -58,9 +85,9 @@ sectors. Twelve files of at most 4096 bytes are supported. Each file has a
 content checksum; overwrites reuse capacity when possible and move to fresh
 sectors when they grow.
 
-BASIC stores up to 64 sorted numbered lines. `SAVE` serializes those lines into
-a C26FS file, while `LOAD` validates and rebuilds the in-memory program. This is
-the only persistence contract—the startup demo itself remains deterministic.
+BASIC stores up to 256 sorted numbered lines of 80 characters. `SAVE`
+serializes those lines into a C26FS file, while `LOAD` validates and rebuilds
+the in-memory program.
 
 ## Audio
 
@@ -90,7 +117,9 @@ external network that QEMU was not configured to provide.
 
 `make smoke` builds the image, creates a fresh raw disk, and boots modern virtio
 block, GPU, keyboard, mouse, and sound devices. The first QEMU process verifies
-CLINT/PLIC counters, live device writes, new-file save and overwrite. It is
-terminated completely. A second QEMU process mounts the same disk, loads and
-runs the stored BASIC text. Static boot text or a single-process RAM cache
-cannot satisfy the gate.
+CLINT/PLIC counters, expression evaluation, FOR/GOSUB/IF control flow, an
+INPUT round-trip, framebuffer checksums that change after drawing statements,
+SOUND argument validation, live device writes, and new-file save and
+overwrite. It is terminated completely. A second QEMU process mounts the same
+disk, loads and runs the stored BASIC text and the installed DEMO program.
+Static boot text or a single-process RAM cache cannot satisfy the gate.

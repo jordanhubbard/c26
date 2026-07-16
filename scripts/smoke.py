@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ELF = ROOT / "build" / "c26.elf"
 DISK = ROOT / "build" / "c26-smoke.img"
+
 FIRST_BOOT_MARKERS = [
     "C26 RISC-V HOME COMPUTER",
     "INTERRUPTS: CLINT timer + PLIC online, idle uses WFI",
@@ -26,24 +27,93 @@ FIRST_BOOT_MARKERS = [
     "DEVICE SDK: register readback=42",
     "CAN SDK: loopback frame received",
     "TCP/IP SDK: packet loopback received",
-    "BASIC READY",
-    "HELLO FROM C26",
-    "DEVICE READ returned 26",
-    "PRINT LET DEVICE READ DEVICE WRITE PEEK POKE LIST RUN NEW DIR SAVE LOAD HELP",
-    "DEVICE READ returned 99",
-    "SAVED BOOT",
     "ROBOT SDK DEMO",
     "stateful I2C + CAN control path ready",
-    "C26 DEMO COMPLETE",
-    "INTERRUPT ACTIVITY: timer=",
+    "C26 HARDWARE ONLINE",
     "C26 INTERACTIVE LOOP ONLINE",
+    "C26 BASIC V3.0",
+    "C26FS: DEMO program installed",
+    "READY",
+    # Interactive language proof, fed over the serial console:
+    "SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT",
+    "100014",            # PRINT 100000+(3+4)*2  (precedence + parens)
+    "-10",               # PRINT 10-20           (signed arithmetic)
+    "LOOPS DONE",        # FOR/NEXT completed
+    "IN SUBROUTINE",     # GOSUB reached
+    "AFTER GOSUB",       # RETURN resumed
+    "1084",              # INPUT round-trip: 42*2+1000
+    "COMPARE OK",        # IF true branch
+    "IF DONE",           # IF false branch skipped, program continued
+    "?ILLEGAL QUANTITY ERROR",  # SOUND rejects voice 9
+    "DEVICE WRITE OK",
+    "DEVICE READ returned 99",
+    "SAVED BOOT",
 ]
+
 SECOND_BOOT_MARKERS = [
-    "C26FS: mounted 1 file(s)",
+    "C26FS: mounted 2 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
+    "LOADED DEMO",
+    "SELF DEMO COMPLETE",
 ]
+
+FIRST_BOOT_INPUT = """\
+help
+print 100000+(3+4)*2
+print 10-20
+new
+10 for i=1 to 3
+20 print i*i
+30 next
+40 print "loops done"
+run
+new
+10 gosub 100
+20 print "after gosub"
+30 end
+100 print "in subroutine"
+110 return
+run
+new
+10 input a
+20 print a*2+1000
+run
+42
+new
+10 if 2>1 then print "compare ok"
+20 if 1>2 then print "bad branch"
+30 print "if done"
+run
+screen 1
+plot 10,10
+print fb
+rect 20,20,100,80
+print fb
+screen 0
+sound 0,440
+sound 9,440
+sound 0,0
+device write 128 99
+device read 128
+new
+10 print "old version"
+save boot
+new
+10 print "persisted across boot"
+save boot
+dir
+"""
+
+SECOND_BOOT_INPUT = """\
+load boot
+list
+run
+load demo
+run
+dir
+"""
 
 
 def run(
@@ -102,9 +172,9 @@ def qemu_command() -> list[str]:
     ]
 
 
-def boot(input_text: str) -> str:
+def boot(input_text: str, timeout: float) -> str:
     try:
-        result = run(qemu_command(), timeout=8.0, input_text=input_text)
+        result = run(qemu_command(), timeout=timeout, input_text=input_text)
         return (result.stdout or "") + (result.stderr or "")
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
@@ -135,35 +205,37 @@ def main() -> int:
         sys.stderr.write(disk.stderr)
         return disk.returncode
 
-    first_output = boot(
-        "help\n"
-        "device write 128 99\n"
-        "device read 128\n"
-        "new\n"
-        '10 print "old version"\n'
-        "save boot\n"
-        '10 print "persisted across boot"\n'
-        "save boot\n"
-        "dir\n"
-    )
+    first_output = boot(FIRST_BOOT_INPUT, timeout=60.0)
     if not require_markers(first_output, FIRST_BOOT_MARKERS, "first-boot"):
         return 1
+    failures: list[str] = []
     if first_output.count("SAVED BOOT") < 2:
-        sys.stderr.write(first_output)
-        sys.stderr.write("\nfirst boot did not prove file overwrite\n")
-        return 1
+        failures.append("first boot did not prove file overwrite")
+    # FOR/NEXT must produce the squares in order.
+    if re.search(r"1\r?\n4\r?\n9\r?\nLOOPS DONE", first_output) is None:
+        failures.append("FOR/NEXT did not print 1,4,9 in order")
+    # The false IF branch must not execute: its text appears only as the echo.
+    if first_output.count("BAD BRANCH") != 1:
+        failures.append("IF false branch executed")
+    # Graphics statements must actually change framebuffer contents.
+    checksums = re.findall(r"PRINT FB\r?\n(\d+)", first_output)
+    if len(checksums) != 2 or checksums[0] == checksums[1] or "0" in checksums:
+        failures.append(f"framebuffer checksums did not change: {checksums}")
     activity = re.search(r"INTERRUPT ACTIVITY: timer=(\d+) external=(\d+)",
                          first_output)
     if activity is None or int(activity.group(1)) == 0 or int(activity.group(2)) == 0:
+        failures.append("CLINT/PLIC interrupt counters did not advance")
+    if failures:
         sys.stderr.write(first_output)
-        sys.stderr.write("\nCLINT/PLIC interrupt counters did not advance\n")
+        sys.stderr.write("\n" + "\n".join(failures) + "\n")
         return 1
 
-    second_output = boot("load boot\nlist\nrun\n")
+    second_output = boot(SECOND_BOOT_INPUT, timeout=45.0)
     if not require_markers(second_output, SECOND_BOOT_MARKERS, "second-boot"):
         return 1
 
-    print("c26 smoke passed (fresh format + persisted BASIC program across restart)")
+    print("c26 smoke passed: expressions, control flow, INPUT, graphics, "
+          "sound and the self demo verified; BASIC persisted across restart")
     return 0
 
 

@@ -27,11 +27,12 @@ replacing magic memory addresses with typed SDK calls.
 | Interrupts | CLINT timer and PLIC-routed UART/virtio IRQs; WFI idle |
 | Storage | 2 MiB virtio-block disk with bounded checksummed C26FS |
 | Display | 640x480x32 software surface on a virtio-GPU scanout |
+| Console | 100x45 scrolling text console, printable-ASCII 5x7 font |
 | 2D/3D | Pixel primitives, text, depth-tested colored triangles |
 | Ray tracing | Integer CPU ray/sphere renderer |
 | Audio | Eight voices mixed to 48kHz S16 stereo and virtio-sound |
 | Input | Virtio keyboard and relative mouse plus serial console |
-| User language | Immediate and line-numbered BASIC with save/load |
+| User language | C26 BASIC V3: expressions, control flow, INPUT/GET, hardware statements, save/load |
 | Device SDK | Register, I2C, CAN and port-addressed packet calls |
 | Robotics | Sensor and motor SDK layered over I2C and CAN |
 

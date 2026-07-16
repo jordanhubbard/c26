@@ -28,6 +28,7 @@ int c26_uart_getc_nonblocking(void)
     if (receive_tail != receive_head) {
         uint8_t value = receive_buffer[receive_tail & 0xffU];
         receive_tail++;
+        c26_uart_enable_interrupt();
         return value;
     }
     if ((uart0[UART_LSR] & UART_LSR_DR) != 0) {
@@ -44,44 +45,16 @@ void c26_uart_enable_interrupt(void)
 void c26_uart_handle_interrupt(void)
 {
     while ((uart0[UART_LSR] & UART_LSR_DR) != 0) {
-        uint8_t value = uart0[UART_RBR];
         uint16_t next = (uint16_t)(receive_head + 1);
-        if ((uint16_t)(next - receive_tail) <= sizeof(receive_buffer)) {
-            receive_buffer[receive_head & 0xffU] = value;
-            receive_head = next;
+        if ((uint16_t)(next - receive_tail) > sizeof(receive_buffer)) {
+            /* Ring full: mask the RX interrupt and leave the byte in the
+               device so QEMU applies backpressure instead of us dropping
+               data. The reader re-enables the interrupt as it drains. */
+            uart0[UART_IER] = 0;
+            return;
         }
+        receive_buffer[receive_head & 0xffU] = uart0[UART_RBR];
+        receive_head = next;
     }
 }
 
-void c26_puts(const char *text)
-{
-    while (text != 0 && *text != '\0') {
-        c26_uart_putc(*text++);
-    }
-}
-
-void c26_put_uint(uint64_t value)
-{
-    char digits[21];
-    size_t used = 0;
-    if (value == 0) {
-        c26_uart_putc('0');
-        return;
-    }
-    while (value != 0 && used < sizeof(digits)) {
-        digits[used++] = (char)('0' + (value % 10));
-        value /= 10;
-    }
-    while (used != 0) {
-        c26_uart_putc(digits[--used]);
-    }
-}
-
-void c26_put_hex(uint64_t value)
-{
-    static const char hex[] = "0123456789abcdef";
-    c26_puts("0x");
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        c26_uart_putc(hex[(value >> shift) & 0xf]);
-    }
-}

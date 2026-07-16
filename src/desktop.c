@@ -1,8 +1,10 @@
 #include "c26.h"
+#include "c26_console.h"
 #include "c26_fs.h"
 #include "c26_graphics.h"
 #include "c26_input.h"
 
+#define KEY_ESC 1U
 #define KEY_BACKSPACE 14U
 #define KEY_ENTER 28U
 #define KEY_LEFTSHIFT 42U
@@ -92,9 +94,9 @@ static void render_desktop(void)
         }
     } else {
         c26_draw_text(36, 163, "BASIC TERMINAL", 0xffffff, 0x29336f, 1);
-        c26_draw_text(38, 198, "C26 BASIC V2", 0x68f0c0, 0x0b1025, 1);
-        c26_draw_text(38, 220, "LIST RUN NEW", 0xbac4ff, 0x0b1025, 1);
-        c26_draw_text(38, 242, "SAVE LOAD DIR", 0xffd34d, 0x0b1025, 1);
+        c26_draw_text(38, 198, "C26 BASIC V3", 0x68f0c0, 0x0b1025, 1);
+        c26_draw_text(38, 220, "ENTER LAUNCHES BASIC", 0xbac4ff, 0x0b1025, 1);
+        c26_draw_text(38, 242, "ESC RETURNS HERE", 0xffd34d, 0x0b1025, 1);
         c26_draw_text(38, 282, "DEVICE APIS", 0xffad45, 0x0b1025, 1);
         c26_draw_text(38, 302, "I2C CAN TCP INPUT", 0xe6e9ff, 0x0b1025, 1);
         c26_draw_text(38, 350, "STATUS", 0xff5ca8, 0x0b1025, 1);
@@ -105,43 +107,54 @@ static void render_desktop(void)
     c26_framebuffer_present();
 }
 
-void c26_desktop_show(void)
+void c26_desktop_init(void)
 {
     c26_framebuffer_init();
     c26_input_init();
     selected_app = 0;
-    render_desktop();
+    c26_screen_set_mode(C26_SCREEN_CONSOLE);
     c26_puts("C26 DESKTOP: graphical shell online\n");
-    c26_puts("DESKTOP INPUT: arrows select, Enter launches, mouse selects\n");
+    c26_puts("DESKTOP INPUT: Esc opens desktop, arrows select, Enter launches\n");
+}
+
+static void enter_console(const char *status)
+{
+    desktop_status = status;
+    c26_screen_set_mode(C26_SCREEN_CONSOLE);
+    c26_console_flush();
 }
 
 static void launch_selected(void)
 {
     switch (selected_app) {
     case 0:
-        desktop_status = "BASIC ACTIVE";
         c26_puts("[DESKTOP] BASIC active\n");
+        enter_console("BASIC ACTIVE");
         break;
     case 1:
         desktop_status = "C26FS BROWSER";
         c26_puts("[DESKTOP] C26FS file browser active\n");
+        redraw_requested = 1;
         break;
     case 2:
         desktop_status = "ROBOT DEMO RAN";
         c26_robot_demo();
+        redraw_requested = 1;
         break;
     case 3:
         desktop_status = "NETWORK LOOPBACK";
         c26_puts("[DESKTOP] network loopback ready\n");
+        redraw_requested = 1;
         break;
     default:
         desktop_status = "DEVICE FABRIC OK";
         c26_puts("[DESKTOP] device fabric ready\n");
+        redraw_requested = 1;
         break;
     }
 }
 
-static int handle_input_event(c26_input_event_t event)
+static int desktop_event(c26_input_event_t event)
 {
     if (event.type == C26_INPUT_EVENT_RELATIVE) {
         if (event.code == 0) pointer_x += event.value;
@@ -152,14 +165,11 @@ static int handle_input_event(c26_input_event_t event)
         if (pointer_y >= (int)C26_SCREEN_HEIGHT) pointer_y = C26_SCREEN_HEIGHT - 1;
         return 1;
     }
-    if (event.type != C26_INPUT_EVENT_KEY) {
+    if (event.type != C26_INPUT_EVENT_KEY || event.value == 0) {
         return 0;
     }
-    if (event.code == KEY_LEFTSHIFT || event.code == KEY_RIGHTSHIFT) {
-        shift_down = event.value != 0;
-        return 0;
-    }
-    if (event.value == 0) {
+    if (event.code == KEY_ESC) {
+        enter_console("BASIC ACTIVE");
         return 0;
     }
     if (event.code == BTN_LEFT) {
@@ -181,40 +191,92 @@ static int handle_input_event(c26_input_event_t event)
         return 1;
     }
     if (event.code == KEY_ENTER) {
-        if (selected_app == 0) c26_basic_feed_char('\n');
-        else launch_selected();
+        launch_selected();
         return 1;
-    }
-    if (event.code == KEY_BACKSPACE) {
-        c26_basic_feed_char('\b');
-        return 0;
-    }
-    char ch = c26_input_key_to_ascii(event.code, shift_down);
-    if (ch != 0 && selected_app == 0) {
-        c26_basic_feed_char(ch);
     }
     return 0;
 }
 
-void c26_desktop_poll(void)
+static void console_event(c26_input_event_t event)
 {
-    int redraw = redraw_requested;
-    redraw_requested = 0;
+    if (event.type != C26_INPUT_EVENT_KEY || event.value == 0) {
+        return;
+    }
+    if (event.code == KEY_ESC) {
+        if (c26_basic_running()) {
+            c26_basic_feed_char(0x1b);
+        } else {
+            c26_screen_set_mode(C26_SCREEN_DESKTOP);
+            redraw_requested = 1;
+        }
+        return;
+    }
+    if (event.code == KEY_ENTER) {
+        c26_basic_feed_char('\n');
+        return;
+    }
+    if (event.code == KEY_BACKSPACE) {
+        c26_basic_feed_char('\b');
+        return;
+    }
+    char ch = c26_input_key_to_ascii(event.code, shift_down);
+    if (ch != 0) {
+        c26_basic_feed_char(ch);
+    }
+}
+
+static void handle_input_event(c26_input_event_t event)
+{
+    if (event.type == C26_INPUT_EVENT_KEY &&
+        (event.code == KEY_LEFTSHIFT || event.code == KEY_RIGHTSHIFT)) {
+        shift_down = event.value != 0;
+        return;
+    }
+    switch (c26_screen_mode()) {
+    case C26_SCREEN_DESKTOP:
+        redraw_requested |= desktop_event(event);
+        break;
+    case C26_SCREEN_CONSOLE:
+    case C26_SCREEN_GFX:
+        console_event(event);
+        break;
+    }
+}
+
+void c26_io_pump(void)
+{
     int ch;
-    while ((ch = c26_uart_getc_nonblocking()) >= 0) {
+    while (c26_basic_can_accept() &&
+           (ch = c26_uart_getc_nonblocking()) >= 0) {
         c26_basic_feed_char((char)ch);
     }
     c26_input_event_t event;
     while (c26_input_poll(&event)) {
-        redraw |= handle_input_event(event);
+        handle_input_event(event);
     }
     c26_audio_poll();
-    if (redraw) {
+}
+
+void c26_desktop_poll(void)
+{
+    static uint64_t last_flush_tick;
+    c26_io_pump();
+    if (c26_screen_mode() == C26_SCREEN_DESKTOP && redraw_requested) {
+        redraw_requested = 0;
         render_desktop();
+    }
+    /* Presenting the console is a full-screen GPU transfer; cap it at
+       one render per 5 timer ticks so typing bursts stay responsive. */
+    uint64_t now = c26_interrupt_ticks();
+    if (c26_console_dirty() && now - last_flush_tick >= 5) {
+        last_flush_tick = now;
+        c26_console_flush();
     }
 }
 
 void c26_desktop_invalidate(void)
 {
-    redraw_requested = 1;
+    if (c26_screen_mode() == C26_SCREEN_DESKTOP) {
+        redraw_requested = 1;
+    }
 }

@@ -17,7 +17,7 @@ CFLAGS := --target=riscv64-unknown-elf -march=rv64imac -mabi=lp64 \
 LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,src/linker.ld \
 	-Wl,--gc-sections -Wl,--no-relax
 
-SRCS := src/boot.S src/trap.S src/uart.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/input.c src/devices.c src/graphics.c \
+SRCS := src/boot.S src/trap.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/input.c src/devices.c src/graphics.c \
 	src/audio.c src/basic.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
