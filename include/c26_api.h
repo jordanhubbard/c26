@@ -1,0 +1,79 @@
+#ifndef C26_API_H
+#define C26_API_H
+
+/* The c26 cartridge ABI, version 1.
+ *
+ * A cartridge is a flat RV64 binary stored in C26FS, linked at
+ * C26_CART_BASE, beginning with c26_cart_header_t. The kernel loads it,
+ * zeroes .bss, and calls the entry as int app_main(const c26_api_t *api).
+ * The return value is reported to the console. Version 1 is cooperative and
+ * unprotected: the app runs in M-mode and must poll api->stop_requested().
+ * Fields are only ever appended; the version bumps when semantics change.
+ */
+
+#include <stddef.h>
+#include <stdint.h>
+
+#define C26_CART_MAGIC 0x54524143U /* "CART" */
+#define C26_CART_VERSION 1U
+#define C26_CART_BASE 0x88000000UL
+#define C26_CART_MAX_BYTES (2U * 1024U * 1024U)
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t load_size;    /* bytes in the file image, header included */
+    uint32_t bss_size;     /* zeroed by the loader after the image */
+    uint32_t entry_offset; /* entry point relative to C26_CART_BASE */
+    uint32_t reserved[3];
+} c26_cart_header_t;
+
+typedef struct {
+    uint32_t version;
+
+    /* Console (mirrored to UART and the text console). */
+    void (*puts)(const char *text);
+    void (*putc)(char ch);
+    void (*put_int)(int64_t value);
+
+    /* Input. getchar returns an ASCII code or -1; mouse reports the
+       machine pointer and button bit 0 = left. */
+    int (*getchar)(void);
+    void (*mouse)(int *x, int *y, int *buttons);
+    int (*stop_requested)(void);
+
+    /* Time. ticks run at 100 Hz; idle pumps I/O and audio, then waits
+       for the next interrupt — call it every loop iteration. */
+    uint64_t (*ticks)(void);
+    void (*idle)(void);
+
+    /* Graphics: direct 640x480 BGRX framebuffer plus primitives.
+       present() pushes the framebuffer to the display. */
+    uint32_t *(*framebuffer)(void);
+    void (*pixel)(int x, int y, uint32_t color);
+    void (*fill_rect)(int x, int y, int w, int h, uint32_t color);
+    void (*draw_rect)(int x, int y, int w, int h, uint32_t color);
+    void (*line)(int x0, int y0, int x1, int y1, uint32_t color);
+    void (*text)(int x, int y, const char *message, uint32_t fg, uint32_t bg,
+                 unsigned int scale);
+    void (*present)(void);
+
+    /* Audio: 8 voices; wave 0 square, 1 saw, 2 triangle, 3 noise. */
+    int (*voice_start)(unsigned int voice, int wave, uint32_t frequency_hz,
+                       uint8_t volume, uint8_t pan);
+    void (*voice_stop)(unsigned int voice);
+
+    /* Storage (C26FS). */
+    int (*fs_save)(const char *name, const void *data, size_t size);
+    int (*fs_load)(const char *name, void *data, size_t capacity,
+                   size_t *size);
+    int (*fs_delete)(const char *name);
+    size_t (*fs_count)(void);
+    int (*fs_entry)(size_t index, const char **name, uint32_t *size);
+
+    /* Device fabric registers. */
+    int (*dev_read8)(uint16_t reg, uint8_t *value);
+    int (*dev_write8)(uint16_t reg, uint8_t value);
+} c26_api_t;
+
+#endif

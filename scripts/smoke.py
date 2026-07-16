@@ -14,7 +14,7 @@ DISK = ROOT / "build" / "c26-smoke.img"
 FIRST_BOOT_MARKERS = [
     "C26 RISC-V HOME COMPUTER",
     "INTERRUPTS: CLINT timer + PLIC online, idle uses WFI",
-    "VIRTIO BLOCK: 4096 sectors online",
+    "VIRTIO BLOCK: 16384 sectors online",
     "C26FS: formatted new disk",
     "C26FS: mounted 0 file(s)",
     "FRAMEBUFFER: virtio-gpu scanout 640x480x32",
@@ -48,15 +48,25 @@ FIRST_BOOT_MARKERS = [
     "DEVICE WRITE OK",
     "DEVICE READ returned 99",
     "SAVED BOOT",
+    "SAVED TEMP",
+    "RENAMED TEMP TO TEMP2",
+    "DELETED TEMP2",
 ]
 
 SECOND_BOOT_MARKERS = [
-    "C26FS: mounted 2 file(s)",
+    # DEMO + BOOT written by the guest, PAINT installed host-side between
+    # boots — proving fsinstall.py can modify a guest-formatted filesystem.
+    "C26FS: mounted 3 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
     "LOADED DEMO",
     "SELF DEMO COMPLETE",
+    "PAINT",
+    "CART START PAINT",
+    "PAINT CART ONLINE",
+    "PAINT CART EXIT",
+    "CART EXIT 0",
 ]
 
 FIRST_BOOT_INPUT = """\
@@ -103,6 +113,9 @@ save boot
 new
 10 print "persisted across boot"
 save boot
+save temp
+rename temp,temp2
+delete temp2
 dir
 """
 
@@ -113,6 +126,8 @@ run
 load demo
 run
 dir
+run "paint"
+q
 """
 
 
@@ -192,7 +207,7 @@ def require_markers(output: str, markers: list[str], boot_name: str) -> bool:
 
 
 def main() -> int:
-    build = run(["make", "build"])
+    build = run(["make", "build", "carts"])
     if build.returncode != 0:
         sys.stderr.write(build.stdout)
         sys.stderr.write(build.stderr)
@@ -230,12 +245,21 @@ def main() -> int:
         sys.stderr.write("\n" + "\n".join(failures) + "\n")
         return 1
 
+    install = run(["python3", "scripts/fsinstall.py", str(DISK),
+                   "PAINT=build/paint.cart"])
+    if install.returncode != 0:
+        sys.stderr.write(install.stdout)
+        sys.stderr.write(install.stderr)
+        sys.stderr.write("\nfsinstall could not modify the guest-formatted disk\n")
+        return 1
+
     second_output = boot(SECOND_BOOT_INPUT, timeout=45.0)
     if not require_markers(second_output, SECOND_BOOT_MARKERS, "second-boot"):
         return 1
 
-    print("c26 smoke passed: expressions, control flow, INPUT, graphics, "
-          "sound and the self demo verified; BASIC persisted across restart")
+    print("c26 smoke passed: language, graphics, sound, C26FS v2 "
+          "delete/rename, two-boot persistence, and a host-built cartridge "
+          "loaded and executed from disk")
     return 0
 
 

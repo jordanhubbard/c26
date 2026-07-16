@@ -18,6 +18,7 @@
 static int selected_app;
 static int pointer_x = 310;
 static int pointer_y = 230;
+static int pointer_buttons;
 static int shift_down;
 static int redraw_requested;
 static const char *desktop_status = "READY";
@@ -154,15 +155,20 @@ static void launch_selected(void)
     }
 }
 
+static void move_pointer(c26_input_event_t event, int minimum_y)
+{
+    if (event.code == 0) pointer_x += event.value;
+    if (event.code == 1) pointer_y += event.value;
+    if (pointer_x < 0) pointer_x = 0;
+    if (pointer_y < minimum_y) pointer_y = minimum_y;
+    if (pointer_x >= (int)C26_SCREEN_WIDTH) pointer_x = C26_SCREEN_WIDTH - 1;
+    if (pointer_y >= (int)C26_SCREEN_HEIGHT) pointer_y = C26_SCREEN_HEIGHT - 1;
+}
+
 static int desktop_event(c26_input_event_t event)
 {
     if (event.type == C26_INPUT_EVENT_RELATIVE) {
-        if (event.code == 0) pointer_x += event.value;
-        if (event.code == 1) pointer_y += event.value;
-        if (pointer_x < 0) pointer_x = 0;
-        if (pointer_y < 34) pointer_y = 34;
-        if (pointer_x >= (int)C26_SCREEN_WIDTH) pointer_x = C26_SCREEN_WIDTH - 1;
-        if (pointer_y >= (int)C26_SCREEN_HEIGHT) pointer_y = C26_SCREEN_HEIGHT - 1;
+        move_pointer(event, 34);
         return 1;
     }
     if (event.type != C26_INPUT_EVENT_KEY || event.value == 0) {
@@ -195,6 +201,34 @@ static int desktop_event(c26_input_event_t event)
         return 1;
     }
     return 0;
+}
+
+static void cart_event(c26_input_event_t event)
+{
+    if (event.type == C26_INPUT_EVENT_RELATIVE) {
+        move_pointer(event, 0);
+        return;
+    }
+    if (event.type != C26_INPUT_EVENT_KEY || event.value == 0 ||
+        event.code == BTN_LEFT) {
+        return;
+    }
+    if (event.code == KEY_ESC) {
+        c26_basic_feed_char(0x1b);
+        return;
+    }
+    if (event.code == KEY_ENTER) {
+        c26_basic_feed_char('\n');
+        return;
+    }
+    if (event.code == KEY_BACKSPACE) {
+        c26_basic_feed_char('\b');
+        return;
+    }
+    char ch = c26_input_key_to_ascii(event.code, shift_down);
+    if (ch != 0) {
+        c26_basic_feed_char(ch);
+    }
 }
 
 static void console_event(c26_input_event_t event)
@@ -232,15 +266,29 @@ static void handle_input_event(c26_input_event_t event)
         shift_down = event.value != 0;
         return;
     }
+    if (event.type == C26_INPUT_EVENT_KEY && event.code == BTN_LEFT) {
+        if (event.value != 0) pointer_buttons |= 1;
+        else pointer_buttons &= ~1;
+    }
     switch (c26_screen_mode()) {
     case C26_SCREEN_DESKTOP:
         redraw_requested |= desktop_event(event);
+        break;
+    case C26_SCREEN_CART:
+        cart_event(event);
         break;
     case C26_SCREEN_CONSOLE:
     case C26_SCREEN_GFX:
         console_event(event);
         break;
     }
+}
+
+void c26_desktop_mouse(int *x, int *y, int *buttons)
+{
+    if (x != 0) *x = pointer_x;
+    if (y != 0) *y = pointer_y;
+    if (buttons != 0) *buttons = pointer_buttons;
 }
 
 void c26_io_pump(void)

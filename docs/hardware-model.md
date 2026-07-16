@@ -25,7 +25,8 @@ replacing magic memory addresses with typed SDK calls.
 | --- | --- |
 | CPU | One RV64IMAC hart, freestanding execution |
 | Interrupts | CLINT timer and PLIC-routed UART/virtio IRQs; WFI idle |
-| Storage | 2 MiB virtio-block disk with bounded checksummed C26FS |
+| Storage | 8 MiB virtio-block disk; C26FS v2: 64 files, 128 KiB, delete/rename |
+| Cartridges | Flat RV64 binaries from C26FS via the c26_api.h vector table |
 | Display | 640x480x32 software surface on a virtio-GPU scanout |
 | Console | 100x45 scrolling text console, printable-ASCII 5x7 font |
 | 2D/3D | Pixel primitives, text, depth-tested colored triangles |

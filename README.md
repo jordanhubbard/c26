@@ -12,9 +12,14 @@ host operating system.
 - M-mode trap handling, a 10 MHz CLINT timer, PLIC-routed UART/virtio
   interrupts, and an idle loop that sleeps with `WFI`.
 - Modern virtio-MMIO transport shared by block, GPU, input, and sound drivers.
-- A persistent 2 MiB raw virtio-block disk containing bounded, checksummed
-  C26FS files. New disks format automatically, existing disks mount at boot,
-  and a fresh machine installs a `DEMO` program written in BASIC.
+- A persistent 8 MiB raw virtio-block disk with C26FS v2: 64 checksummed
+  files up to 128 KiB, a free-sector allocation bitmap, and DELETE/RENAME.
+  New disks format automatically, existing disks mount at boot, and a fresh
+  machine installs a `DEMO` program written in BASIC.
+- A cartridge port: apps are flat RV64 binaries in C26FS, compiled out of
+  tree against the frozen `include/c26_api.h` vector table and launched with
+  `RUN "NAME"`. `apps/paint` ships as the first cartridge (mouse draws, 1-8
+  pick colors); `scripts/fsinstall.py` installs cartridges from the host.
 - 640x480 32-bit virtio-GPU scanout with software-buffer fallback, rendering
   a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with
@@ -28,8 +33,9 @@ host operating system.
 - BASIC hardware statements over the SDKs: `SCREEN`, `CLS`, `COLOR` (C64
   palette or 24-bit RGB), `PLOT`, `LINE`, `RECT`, `TEXT`, `SOUND`, `DEVICE
   READ/WRITE`, `ROBOT`, plus `PEEK`/`POKE` compatibility aliases.
-- `LIST`, `RUN`, `NEW`, `DIR`, `SAVE`, `LOAD` manage stored programs (256
-  lines of 80 characters).
+- `LIST`, `RUN`, `NEW`, `DIR`, `SAVE`, `LOAD`, `DELETE`, `RENAME` manage
+  stored programs (256 lines of 80 characters); `RUN "NAME"` launches a
+  cartridge.
 - `c26_gl`-style software 3D SDK with filled triangles, color interpolation,
   a depth buffer, and a CPU ray tracer.
 - Eight-voice, 48 kHz stereo audio mixer with waveforms, pan, envelopes, and a
@@ -40,6 +46,7 @@ host operating system.
 The public SDK surfaces are in `include/c26_graphics.h`,
 `include/c26_audio.h`, `include/c26_input.h`, `include/c26_block.h`,
 `include/c26_fs.h`, `include/c26_console.h`, and `include/c26_devices.h`.
+Cartridges see the machine through `include/c26_api.h` only.
 
 ## Build and run
 

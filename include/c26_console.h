@@ -10,6 +10,7 @@ typedef enum {
     C26_SCREEN_CONSOLE = 0,
     C26_SCREEN_DESKTOP = 1,
     C26_SCREEN_GFX = 2,
+    C26_SCREEN_CART = 3,
 } c26_screen_mode_t;
 
 void c26_console_clear(void);

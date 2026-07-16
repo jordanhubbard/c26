@@ -51,6 +51,7 @@ static char file_buffer[C26_FS_FILE_MAX + 1];
 
 static volatile int running;
 static volatile int break_flag;
+static volatile int external_consumer;
 static char key_queue[KEY_QUEUE_SIZE];
 static unsigned int key_head;
 static unsigned int key_tail;
@@ -1318,6 +1319,23 @@ static void process_line(const char *line)
         return;
     }
     if (keyword(line, "RUN")) {
+        const char *cursor = c26_skip_spaces(line + 3);
+        if (*cursor == '"') {
+            char name[C26_FS_NAME_MAX + 1];
+            size_t length = 0;
+            cursor++;
+            while (*cursor != '\0' && *cursor != '"' &&
+                   length < C26_FS_NAME_MAX) {
+                name[length++] = *cursor++;
+            }
+            name[length] = '\0';
+            if (*cursor != '"' || length == 0) {
+                c26_puts("Usage: RUN \"NAME\"\n");
+                return;
+            }
+            c26_cart_run(name);
+            return;
+        }
         run_program();
         return;
     }
@@ -1339,10 +1357,50 @@ static void process_line(const char *line)
         list_files();
         return;
     }
+    if (keyword(line, "DELETE")) {
+        char name[C26_FS_NAME_MAX + 1];
+        if (!parse_filename(line, 6, name)) {
+            c26_puts("Usage: DELETE name\n");
+        } else if (c26_fs_delete(name)) {
+            c26_puts("DELETED ");
+            c26_puts(name);
+            c26_putc('\n');
+            c26_desktop_invalidate();
+        } else {
+            c26_puts("Error: delete failed\n");
+        }
+        return;
+    }
+    if (keyword(line, "RENAME")) {
+        char old_name[C26_FS_NAME_MAX + 1];
+        char new_name[C26_FS_NAME_MAX + 1];
+        const char *cursor = c26_skip_spaces(line + 6);
+        size_t length = 0;
+        while (*cursor != '\0' && *cursor != ' ' && *cursor != ',' &&
+               length < C26_FS_NAME_MAX) {
+            old_name[length++] = *cursor++;
+        }
+        old_name[length] = '\0';
+        if (*cursor == ',') cursor++;
+        if (!parse_filename(cursor, 0, new_name) || length == 0) {
+            c26_puts("Usage: RENAME old new\n");
+        } else if (c26_fs_rename(old_name, new_name)) {
+            c26_puts("RENAMED ");
+            c26_puts(old_name);
+            c26_puts(" TO ");
+            c26_puts(new_name);
+            c26_putc('\n');
+            c26_desktop_invalidate();
+        } else {
+            c26_puts("Error: rename failed\n");
+        }
+        return;
+    }
     if (keyword(line, "HELP")) {
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
-        c26_puts("LIST RUN NEW DIR SAVE LOAD HELP  FUNCTIONS: RND ABS PEEK TI FB\n");
+        c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" HELP\n");
+        c26_puts("FUNCTIONS: RND ABS PEEK TI FB\n");
         return;
     }
     exec_t result = exec_statement(line, -1);
@@ -1405,7 +1463,28 @@ int c26_basic_running(void)
 
 int c26_basic_can_accept(void)
 {
-    return !running || key_head - key_tail < KEY_QUEUE_SIZE;
+    return !(running || external_consumer) ||
+           key_head - key_tail < KEY_QUEUE_SIZE;
+}
+
+int c26_basic_key_pop(char *ch)
+{
+    return queue_pop(ch);
+}
+
+int c26_basic_break_requested(void)
+{
+    return break_flag;
+}
+
+void c26_basic_clear_break(void)
+{
+    break_flag = 0;
+}
+
+void c26_basic_set_external_consumer(int on)
+{
+    external_consumer = on != 0;
 }
 
 void c26_basic_feed_char(char ch)
@@ -1413,8 +1492,10 @@ void c26_basic_feed_char(char ch)
     if (ch == '\r') {
         ch = '\n';
     }
-    if (running) {
-        if (ch == 0x03 || ch == 0x1b) {
+    if (running || external_consumer) {
+        /* Ctrl-C always breaks; Esc breaks BASIC but is delivered to a
+           cartridge so apps can use it themselves. */
+        if (ch == 0x03 || (ch == 0x1b && !external_consumer)) {
             break_flag = 1;
             return;
         }

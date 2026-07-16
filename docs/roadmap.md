@@ -17,23 +17,29 @@ language make the hardware do something visible and audible. The 2026-07
 5. Smoke v2 gates all of it headlessly, including the two-process disk
    persistence proof.
 
+## Delivered: M2 — the cartridge port (2026-07-17)
+
+C26FS v2 (64 files, 128 KiB, free-sector bitmap, DELETE/RENAME), the frozen
+`c26_api.h` cartridge ABI, the loader, host-side installation via
+`scripts/fsinstall.py`, and `apps/paint` as the first out-of-tree program.
+Version 1 is cooperative and unprotected by design.
+
 ## Remaining course (in priority order)
 
-- **virtio-net with a minimal honest IP stack.** QEMU emulates virtio-net;
-  ARP/ICMP/UDP plus a guest echo verified through user-net hostfwd retires
-  the "TCP/IP" loopback label for real networking.
-- **C26FS growth.** DELETE/RENAME in fs.c, BASIC, and the Files app; a
-  free-sector map instead of append-only allocation; raise the 12-file/4 KiB
-  limits.
-- **User C programs (the cartridge port).** A stable SDK vector table and
-  memory-map contract; load flat binaries from C26FS and run them. The
-  biggest architectural step; deferred until the interactive machine has
-  soaked.
-- **Host-side unit tests.** Compile the BASIC expression evaluator and C26FS
-  layout logic on the host so parser and filesystem bugs are caught without a
-  QEMU boot.
-- **BASIC strings and a full-screen editor.** `A$` variables and C64-style
-  in-place line editing on the console.
+- **M3 — Protection.** S-mode kernel, Sv39 address spaces, user-mode
+  processes, a one-screen syscall surface, preemptive scheduling, IPC. The
+  qualitative leap 50 years buys: a crashing app no longer takes the machine.
+- **M4 — Compositor.** Per-app shared-memory surfaces, z-order, focus
+  routing; the desktop becomes real windows.
+- **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
+  text editor become windowed apps.
+- **M6 — App suite + networking.** virtio-net with a minimal honest IP
+  stack, then editor, paint, tracker, network client, robot panel, a game.
+- **M7 — Self-hosting + scriptable desktop.** On-machine editor and
+  assembler/tiny-C producing runnable cartridges; BASIC bindings into the
+  toolkit; the experiment writeup (LOC budget vs capability).
+- **Continuous.** Host-side unit tests for basic.c/fs.c logic; BASIC strings
+  and a full-screen editor.
 
 Principles that bound all of it: freestanding C and assembly only in the
 target; a hobbyist can read the whole system; a capability is called

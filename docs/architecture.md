@@ -79,11 +79,26 @@ machine's own language.
 ## Persistent storage
 
 `src/block.c` drives a modern virtio-block queue synchronously during bounded
-filesystem operations. `src/fs.c` owns the native C26FS format: one checksummed
-superblock sector, one checksummed fixed directory, and append-allocated data
-sectors. Twelve files of at most 4096 bytes are supported. Each file has a
-content checksum; overwrites reuse capacity when possible and move to fresh
-sectors when they grow.
+filesystem operations. `src/fs.c` owns the C26FS v2 format: a checksummed
+superblock (sector 0), a directory of 64 fixed 32-byte entries (sectors 1-4),
+a free-sector bitmap (sectors 5-8), and contiguous first-fit data extents.
+Files hold up to 128 KiB, each with a content checksum; overwrites reuse
+their extent when the new size fits and relocate when it grows, and DELETE
+and RENAME are supported. `scripts/fsinstall.py` implements the identical
+layout host-side so cartridges can be installed into disk images; the smoke
+gate has each implementation read what the other wrote.
+
+## Cartridges
+
+`include/c26_api.h` is the frozen ABI: a cartridge is a flat RV64 binary
+linked at `0x88000000`, starting with a validated header, entered as
+`int app_main(const c26_api_t *api)`. The API vector table exposes console,
+input (keys, mouse, break), time, framebuffer primitives, audio voices,
+C26FS, and device registers. `src/cart.c` loads the file from C26FS, zeroes
+bss, executes `fence.i`, and calls the entry; `RUN "NAME"` in BASIC launches
+it. Version 1 is deliberately unprotected and cooperative — apps run in
+M-mode on the kernel stack and poll `stop_requested()`; process isolation is
+the next milestone, not an accident this one forgot.
 
 BASIC stores up to 256 sorted numbered lines of 80 characters. `SAVE`
 serializes those lines into a C26FS file, while `LOAD` validates and rebuilds
