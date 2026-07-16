@@ -1,9 +1,10 @@
 # c26 Implementation Record
 
 The original implementation plan described a UART-only vertical slice. The
-abandoned stories were completed on 2026-07-16 and are tracked in Beads; this
-document records the delivered boundaries and verification evidence rather than
-serving as a second task tracker.
+abandoned stories were completed on 2026-07-16 and their history was converted
+into the MAC hub task ledger under project `c26`; this document records the
+delivered boundaries and verification evidence rather than serving as a second
+task tracker.
 
 ## Delivered story mapping
 
