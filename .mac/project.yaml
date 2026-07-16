@@ -1,5 +1,6 @@
 schema: mac.repository_contract.v1
 project: c26
+canonical_remote_url: git@github.com:jordanhubbard/c26.git
 platforms:
   - darwin
   - linux
