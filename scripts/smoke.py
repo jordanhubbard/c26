@@ -10,17 +10,34 @@ ROOT = Path(__file__).resolve().parents[1]
 ELF = ROOT / "build" / "c26.elf"
 MARKERS = [
     "C26 RISC-V HOME COMPUTER",
-    "C26 DESKTOP",
+    "FRAMEBUFFER: virtio-gpu scanout 640x480x32",
+    "VIRTIO INPUT: 2 device(s) online",
+    "C26 DESKTOP: graphical shell online",
+    "OPENGL-STYLE SDK: z-buffered triangle rasterizer online",
+    "RAY TRACER: two shaded spheres rendered",
+    "AUDIO MIXER: 8 voices, 48kHz stereo PCM, pan + envelope",
+    "VIRTIO SOUND: PCM output stream online",
+    "DEVICE SDK: register readback=42",
+    "CAN SDK: loopback frame received",
+    "TCP/IP SDK: packet loopback received",
     "BASIC READY",
     "HELLO FROM C26",
-    "26",
-    "42",
-    "PEEK returned emulated device byte 26",
+    "DEVICE READ returned 26",
+    "PRINT LET DEVICE READ DEVICE WRITE PEEK POKE HELP",
+    "DEVICE READ returned 99",
+    "ROBOT SDK DEMO",
+    "stateful I2C + CAN control path ready",
     "C26 DEMO COMPLETE",
+    "C26 INTERACTIVE LOOP ONLINE",
 ]
 
 
-def run(command: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
+def run(
+    command: list[str],
+    *,
+    timeout: float | None = None,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=str(ROOT),
@@ -28,6 +45,7 @@ def run(command: list[str], *, timeout: float | None = None) -> subprocess.Compl
         capture_output=True,
         timeout=timeout,
         check=False,
+        input=input_text,
     )
 
 
@@ -42,19 +60,40 @@ def main() -> int:
         "qemu-system-riscv64",
         "-M",
         "virt",
+        "-global",
+        "virtio-mmio.force-legacy=false",
         "-cpu",
         "rv64",
         "-m",
         "256M",
-        "-nographic",
+        "-display",
+        "none",
+        "-serial",
+        "stdio",
+        "-monitor",
+        "none",
         "-bios",
         "none",
         "-no-reboot",
         "-kernel",
         str(ELF),
+        "-device",
+        "virtio-gpu-device",
+        "-device",
+        "virtio-keyboard-device",
+        "-device",
+        "virtio-mouse-device",
+        "-audiodev",
+        "driver=none,id=audio0",
+        "-device",
+        "virtio-sound-device,audiodev=audio0",
     ]
     try:
-        result = run(qemu_command, timeout=3.0)
+        result = run(
+            qemu_command,
+            timeout=6.0,
+            input_text="help\ndevice write 128 99\ndevice read 128\n",
+        )
         output = (result.stdout or "") + (result.stderr or "")
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")

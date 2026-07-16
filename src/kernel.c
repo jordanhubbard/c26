@@ -13,8 +13,10 @@ void kmain(void)
     c26_robot_demo();
 
     c26_puts("C26 DEMO COMPLETE\n");
+    c26_puts("C26 INTERACTIVE LOOP ONLINE\n");
 
     for (;;) {
-        __asm__ volatile("wfi");
+        c26_desktop_poll();
+        __asm__ volatile("nop");
     }
 }

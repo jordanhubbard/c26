@@ -1,6 +1,9 @@
 #include "c26.h"
+#include "c26_devices.h"
 
 static uint64_t vars[26];
+static char input_line[96];
+static size_t input_length;
 
 static int var_index(char name)
 {
@@ -74,11 +77,47 @@ static void run_poke(const char *line)
         cursor++;
     }
     uint64_t value = c26_parse_uint(&cursor);
-    c26_puts("POKE ");
-    c26_put_hex(address);
-    c26_puts(", ");
+    c26_device_write8((uint16_t)(address & 0xff), (uint8_t)value);
+    c26_puts("POKE compatibility alias used DEVICE WRITE\n");
+}
+
+static void run_peek(const char *line)
+{
+    const char *cursor = c26_skip_spaces(line + 4);
+    uint64_t address = c26_parse_uint(&cursor);
+    uint8_t value = 0;
+    c26_device_read8((uint16_t)(address & 0xff), &value);
+    c26_puts("PEEK compatibility alias returned ");
     c26_put_uint(value);
-    c26_puts(" (emulated)\n");
+    c26_uart_putc('\n');
+}
+
+static void run_device(const char *line)
+{
+    const char *cursor = c26_skip_spaces(line + 6);
+    if (c26_starts_with(cursor, "WRITE")) {
+        cursor = c26_skip_spaces(cursor + 5);
+        uint64_t reg = c26_parse_uint(&cursor);
+        uint64_t value = c26_parse_uint(&cursor);
+        if (c26_device_write8((uint16_t)reg, (uint8_t)value)) {
+            c26_puts("DEVICE WRITE OK\n");
+        } else {
+            c26_puts("Error: invalid device register\n");
+        }
+    } else if (c26_starts_with(cursor, "READ")) {
+        cursor = c26_skip_spaces(cursor + 4);
+        uint64_t reg = c26_parse_uint(&cursor);
+        uint8_t value = 0;
+        if (c26_device_read8((uint16_t)reg, &value)) {
+            c26_puts("DEVICE READ returned ");
+            c26_put_uint(value);
+            c26_uart_putc('\n');
+        } else {
+            c26_puts("Error: invalid device register\n");
+        }
+    } else {
+        c26_puts("Usage: DEVICE READ reg | DEVICE WRITE reg value\n");
+    }
 }
 
 static void run_line(const char *line)
@@ -94,8 +133,19 @@ static void run_line(const char *line)
     } else if (c26_starts_with(line, "POKE")) {
         run_poke(line);
     } else if (c26_starts_with(line, "PEEK")) {
-        c26_puts("PEEK returned emulated device byte 26\n");
+        run_peek(line);
+    } else if (c26_starts_with(line, "DEVICE")) {
+        run_device(line);
+    } else if (c26_starts_with(line, "HELP")) {
+        c26_puts("PRINT LET DEVICE READ DEVICE WRITE PEEK POKE HELP\n");
+    } else if (*line != '\0') {
+        c26_puts("Error: unknown command. Type HELP.\n");
     }
+}
+
+static void prompt(void)
+{
+    c26_puts("] ");
 }
 
 void c26_basic_demo(void)
@@ -107,12 +157,12 @@ void c26_basic_demo(void)
         "40 PRINT \"BASIC READY\"",
         "50 PRINT \"HELLO FROM C26\"",
         "60 PRINT 20+6",
-        "70 POKE 53280,26",
-        "80 PEEK 53280",
+        "70 DEVICE WRITE 128 26",
+        "80 DEVICE READ 128",
         0,
     };
 
-    c26_puts("C26 BASIC V0.2\n");
+    c26_puts("C26 BASIC V1.0\n");
 
     for (size_t i = 0; program[i] != 0; i++) {
         c26_puts("] ");
@@ -120,4 +170,34 @@ void c26_basic_demo(void)
         c26_uart_putc('\n');
         run_line(program[i]);
     }
+    c26_puts("BASIC INTERACTIVE READY - TYPE HELP\n");
+    input_length = 0;
+    prompt();
+}
+
+void c26_basic_feed_char(char ch)
+{
+    if (ch == '\r' || ch == '\n') {
+        c26_uart_putc('\n');
+        input_line[input_length] = '\0';
+        run_line(input_line);
+        input_length = 0;
+        prompt();
+        return;
+    }
+    if (ch == '\b' || ch == 0x7f) {
+        if (input_length != 0) {
+            input_length--;
+            c26_puts("\b \b");
+        }
+        return;
+    }
+    if (ch < 32 || ch > 126 || input_length + 1 >= sizeof(input_line)) {
+        return;
+    }
+    if (ch >= 'a' && ch <= 'z') {
+        ch -= ('a' - 'A');
+    }
+    input_line[input_length++] = ch;
+    c26_uart_putc(ch);
 }
