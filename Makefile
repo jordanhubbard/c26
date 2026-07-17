@@ -27,7 +27,7 @@ OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
 	-Wl,--no-relax
-CART_NAMES := paint crash spin ticker
+CART_NAMES := paint crash spin ticker ping pong
 CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
 QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M

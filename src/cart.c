@@ -7,20 +7,27 @@
 #include "c26_graphics.h"
 #include "c26_user.h"
 
-/* The process host. Up to C26_NPROC cartridges run concurrently, each a
- * U-mode process with its own Sv39 space and its own 640x480 surface. All
- * cartridges link at C26_CART_BASE; page tables map that VA to a different
- * physical slot per process. The kernel schedules round-robin time slices
- * from the main loop; the timer trap ends a slice, and faults, exits,
- * Ctrl-C, and KILL end a process. The compositor blits the focused
- * process's surface to the scanout with a status bar; Ctrl-T/Tab move
- * focus without stopping anything. */
+/* The process host and window manager. Up to C26_NPROC cartridges run
+ * concurrently, each a U-mode process with its own Sv39 space, its own
+ * surface, and a movable window composited in z-order over the BASIC
+ * console, which is the root layer. All cartridges link at C26_CART_BASE;
+ * page tables map that VA to a different physical slot per process. The
+ * kernel schedules round-robin time slices from the main loop; the timer
+ * trap ends a slice, and faults, exits, Ctrl-C, and KILL end a process.
+ * Jobs also exchange bounded messages through per-process mailboxes. */
 
 #define C26_NPROC 4
 #define USER_STACK_BYTES (64U * 1024U)
 #define SLICE_TICKS 3
 #define EXIT_SLICE 0x7fff0001L
 #define SURFACE_PIXELS (C26_SCREEN_WIDTH * C26_SCREEN_HEIGHT)
+
+#define TITLE_HEIGHT 14
+#define BORDER 1
+#define WINDOW_DEFAULT_W 420
+#define WINDOW_DEFAULT_H 300
+#define MAILBOX_SLOTS 4U
+#define MESSAGE_MAX 240U
 
 extern char c26_user_stub_base[];
 extern char c26_user_stub_exit[];
@@ -32,12 +39,26 @@ typedef enum {
 } proc_state_t;
 
 typedef struct {
+    uint8_t from;
+    uint16_t length;
+    uint8_t data[MESSAGE_MAX];
+} message_t;
+
+typedef struct {
     proc_state_t state;
     char name[C26_FS_NAME_MAX + 1];
     c26_user_frame_t frame;
     c26_vm_space_t space;
     int kill_pending;
     int surface_damaged;
+    /* Window geometry: content is [0,w) x [0,h) of the surface. */
+    int win_x;
+    int win_y;
+    int win_w;
+    int win_h;
+    message_t mail[MAILBOX_SLOTS];
+    unsigned int mail_head;
+    unsigned int mail_tail;
 } proc_t;
 
 c26_user_frame_t *c26_current_frame;
@@ -54,8 +75,14 @@ static uint32_t proc_surface[C26_NPROC][SURFACE_PIXELS]
 static int current = -1;
 static int focused = -1;
 static int rr_cursor;
-static int compose_needed;
+static int scene_dirty;
 static volatile int slice_ticks_left;
+
+static int z_order[C26_NPROC];
+static int z_count;
+static int dragging = -1;
+static int drag_dx;
+static int drag_dy;
 
 /* ------------------------------------------------------------------ */
 /* Surface primitives (draw into a process surface, clipped)           */
@@ -129,7 +156,26 @@ static void surface_text(uint32_t *surface, int x, int y, const char *text,
 }
 
 /* ------------------------------------------------------------------ */
-/* Focus and the compositor                                            */
+/* Z-order, focus, and the compositor                                  */
+
+static void z_remove(int job)
+{
+    for (int i = 0; i < z_count; i++) {
+        if (z_order[i] == job) {
+            for (int j = i + 1; j < z_count; j++) {
+                z_order[j - 1] = z_order[j];
+            }
+            z_count--;
+            return;
+        }
+    }
+}
+
+static void z_raise(int job)
+{
+    z_remove(job);
+    z_order[z_count++] = job;
+}
 
 static void drain_typeahead(void)
 {
@@ -145,18 +191,19 @@ static void drain_typeahead(void)
 void c26_cart_focus_console(void)
 {
     focused = -1;
+    scene_dirty = 1;
     c26_basic_set_external_consumer(0);
     c26_screen_set_mode(C26_SCREEN_CONSOLE);
     drain_typeahead();
-    c26_console_flush();
 }
 
 static void focus_proc(int index)
 {
     focused = index;
+    scene_dirty = 1;
+    z_raise(index);
     c26_basic_set_external_consumer(1);
     c26_screen_set_mode(C26_SCREEN_CART);
-    compose_needed = 1;
 }
 
 void c26_cart_focus_next(void)
@@ -175,37 +222,111 @@ void c26_cart_focus_next(void)
     }
 }
 
+static void blit_window(const proc_t *process, const uint32_t *surface)
+{
+    uint32_t *pixels = c26_framebuffer_pixels();
+    int content_x = process->win_x + BORDER;
+    int content_y = process->win_y + TITLE_HEIGHT;
+    int frame_w = process->win_w + 2 * BORDER;
+    int frame_h = process->win_h + TITLE_HEIGHT + BORDER;
+    int is_focused = process == &procs[focused >= 0 ? focused : 0] &&
+                     focused >= 0;
+
+    c26_draw_rect(process->win_x, process->win_y, frame_w, frame_h,
+                  is_focused ? 0xffffff : 0x6570bd);
+    c26_fill_rect(process->win_x + BORDER, process->win_y + BORDER,
+                  process->win_w, TITLE_HEIGHT - BORDER,
+                  is_focused ? 0x35409a : 0x222957);
+    c26_draw_text(process->win_x + 6, process->win_y + 4, process->name,
+                  0xffffff, is_focused ? 0x35409a : 0x222957, 1);
+
+    for (int row = 0; row < process->win_h; row++) {
+        int dst_y = content_y + row;
+        if (dst_y < 0 || dst_y >= (int)C26_SCREEN_HEIGHT) continue;
+        for (int col = 0; col < process->win_w; col++) {
+            int dst_x = content_x + col;
+            if (dst_x < 0 || dst_x >= (int)C26_SCREEN_WIDTH) continue;
+            pixels[(unsigned int)dst_y * C26_SCREEN_WIDTH +
+                   (unsigned int)dst_x] =
+                surface[(unsigned int)row * C26_SCREEN_WIDTH +
+                        (unsigned int)col];
+        }
+    }
+}
+
 void c26_compositor_flush(void)
 {
-    if (focused < 0 || c26_screen_mode() != C26_SCREEN_CART) {
+    c26_screen_mode_t mode = c26_screen_mode();
+    if (mode != C26_SCREEN_CONSOLE && mode != C26_SCREEN_CART) {
         return;
     }
-    proc_t *process = &procs[focused];
-    if (!process->surface_damaged && !compose_needed) {
+    int damage = scene_dirty || c26_console_dirty();
+    for (int i = 0; i < z_count; i++) {
+        damage |= procs[z_order[i]].surface_damaged;
+    }
+    if (!damage) {
         return;
     }
-    process->surface_damaged = 0;
-    compose_needed = 0;
-    uint32_t *pixels = c26_framebuffer_pixels();
-    memcpy(pixels, proc_surface[focused], SURFACE_PIXELS * 4);
-    int bar_y = (int)C26_SCREEN_HEIGHT - 12;
-    c26_fill_rect(0, bar_y, (int)C26_SCREEN_WIDTH, 12, 0x222957);
-    char label[64];
-    size_t used = 0;
-    label[used++] = 'J';
-    label[used++] = 'O';
-    label[used++] = 'B';
-    label[used++] = ' ';
-    label[used++] = (char)('0' + focused);
-    label[used++] = ' ';
-    for (const char *n = process->name; *n != '\0' && used < 24; n++) {
-        label[used++] = *n;
+    scene_dirty = 0;
+    c26_console_render_cells();
+    for (int i = 0; i < z_count; i++) {
+        proc_t *process = &procs[z_order[i]];
+        process->surface_damaged = 0;
+        blit_window(process, proc_surface[z_order[i]]);
     }
-    label[used] = '\0';
-    c26_draw_text(6, bar_y + 2, label, 0xffffff, 0x222957, 1);
-    c26_draw_text(300, bar_y + 2, "TAB NEXT  CTRL-T CONSOLE  CTRL-C KILL",
-                  0x9df6ff, 0x222957, 1);
+    if (z_count > 0) {
+        c26_desktop_draw_pointer();
+    }
     c26_framebuffer_present();
+}
+
+/* Window-manager input, called by the desktop with pointer coordinates. */
+int c26_wm_click(int x, int y, int pressed)
+{
+    if (!pressed) {
+        dragging = -1;
+        return 0;
+    }
+    for (int i = z_count - 1; i >= 0; i--) {
+        int job = z_order[i];
+        proc_t *process = &procs[job];
+        int frame_w = process->win_w + 2 * BORDER;
+        int frame_h = process->win_h + TITLE_HEIGHT + BORDER;
+        if (x < process->win_x || x >= process->win_x + frame_w ||
+            y < process->win_y || y >= process->win_y + frame_h) {
+            continue;
+        }
+        focus_proc(job);
+        if (y < process->win_y + TITLE_HEIGHT) {
+            dragging = job;
+            drag_dx = x - process->win_x;
+            drag_dy = y - process->win_y;
+        }
+        return 1;
+    }
+    if (focused >= 0) {
+        c26_cart_focus_console();
+    }
+    return 0;
+}
+
+void c26_wm_pointer_moved(int x, int y)
+{
+    if (dragging >= 0 && procs[dragging].state == PROC_RUNNABLE) {
+        proc_t *process = &procs[dragging];
+        process->win_x = x - drag_dx;
+        process->win_y = y - drag_dy;
+        if (process->win_x < -process->win_w + 40)
+            process->win_x = -process->win_w + 40;
+        if (process->win_y < 0) process->win_y = 0;
+        if (process->win_x > (int)C26_SCREEN_WIDTH - 40)
+            process->win_x = (int)C26_SCREEN_WIDTH - 40;
+        if (process->win_y > (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT)
+            process->win_y = (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT;
+    }
+    if (z_count > 0) {
+        scene_dirty = 1;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -286,7 +407,14 @@ static long do_syscall(c26_user_frame_t *frame)
         int y;
         int buttons;
         c26_desktop_mouse(&x, &y, &buttons);
-        if (current != focused) buttons = 0;
+        /* Window-local coordinates; buttons only while focused and not
+           when the pointer is over the window chrome. */
+        x -= process->win_x + BORDER;
+        y -= process->win_y + TITLE_HEIGHT;
+        if (current != focused || x < 0 || y < 0 || x >= process->win_w ||
+            y >= process->win_h) {
+            buttons = 0;
+        }
         uintptr_t px = a0 != 0 ? user_ptr(a0, 4, 1) : 1;
         uintptr_t py = a1 != 0 ? user_ptr(a1, 4, 1) : 1;
         uintptr_t pb = a2 != 0 ? user_ptr(a2, 4, 1) : 1;
@@ -301,7 +429,6 @@ static long do_syscall(c26_user_frame_t *frame)
     case C26_SYS_TICKS:
         return (long)c26_interrupt_ticks();
     case C26_SYS_YIELD:
-        /* Give up the rest of the slice. */
         c26_user_terminate(EXIT_SLICE);
     case C26_SYS_FRAMEBUFFER:
         return (long)(uintptr_t)proc_surface[current];
@@ -402,6 +529,52 @@ static long do_syscall(c26_user_frame_t *frame)
     }
     case C26_SYS_DEV_WRITE8:
         return c26_device_write8((uint16_t)a0, (uint8_t)a1);
+    case C26_SYS_WINDOW_SIZE: {
+        uintptr_t pw = a0 != 0 ? user_ptr(a0, 4, 1) : 1;
+        uintptr_t ph = a1 != 0 ? user_ptr(a1, 4, 1) : 1;
+        if (pw == 0 || ph == 0) break;
+        if (a0 != 0) *(uint32_t *)pw = (uint32_t)process->win_w;
+        if (a1 != 0) *(uint32_t *)ph = (uint32_t)process->win_h;
+        return 0;
+    }
+    case C26_SYS_SEND: {
+        int target = (int)(int64_t)a0;
+        if (target < 0 || target >= C26_NPROC ||
+            procs[target].state != PROC_RUNNABLE || a2 > MESSAGE_MAX) {
+            return 0;
+        }
+        uintptr_t data = user_ptr(a1, a2 == 0 ? 1 : a2, 0);
+        if (data == 0) break;
+        proc_t *peer = &procs[target];
+        if (peer->mail_head - peer->mail_tail >= MAILBOX_SLOTS) {
+            return 0;
+        }
+        message_t *message = &peer->mail[peer->mail_head % MAILBOX_SLOTS];
+        message->from = (uint8_t)current;
+        message->length = (uint16_t)a2;
+        memcpy(message->data, (const void *)data, a2);
+        peer->mail_head++;
+        return 1;
+    }
+    case C26_SYS_RECV: {
+        if (process->mail_tail == process->mail_head) {
+            return -1;
+        }
+        message_t *message = &process->mail[process->mail_tail % MAILBOX_SLOTS];
+        uint64_t copy = message->length < a2 ? message->length : a2;
+        if (copy != 0) {
+            uintptr_t data = user_ptr(a1, copy, 1);
+            if (data == 0) break;
+            memcpy((void *)data, message->data, copy);
+        }
+        if (a0 != 0) {
+            uintptr_t from = user_ptr(a0, 4, 1);
+            if (from == 0) break;
+            *(int *)from = message->from;
+        }
+        process->mail_tail++;
+        return (long)copy;
+    }
     default:
         break;
     }
@@ -420,8 +593,6 @@ void c26_trap_handler_user(c26_user_frame_t *frame)
         } else if (cause == 11) {
             c26_external_interrupt();
         }
-        /* The kernel owns the machine on every interrupt: input and audio
-           survive a spinning app, and kill requests land immediately. */
         c26_io_pump();
         if (c26_basic_break_requested() && focused >= 0) {
             procs[focused].kill_pending = 1;
@@ -455,6 +626,11 @@ static void finalize(int index, long code)
 {
     procs[index].state = PROC_FREE;
     procs[index].kill_pending = 0;
+    z_remove(index);
+    scene_dirty = 1;
+    if (dragging == index) {
+        dragging = -1;
+    }
     if (code == -3) {
         c26_puts("CART KILLED\n");
     }
@@ -530,7 +706,13 @@ int c26_cart_run(const char *name)
         (uint64_t)(uintptr_t)proc_stack[slot] + USER_STACK_BYTES;
     C26_FRAME_X(&process->frame, 10) = (uint64_t)(uintptr_t)c26_user_api;
     process->kill_pending = 0;
-    process->surface_damaged = 0;
+    process->surface_damaged = 1;
+    process->win_w = WINDOW_DEFAULT_W;
+    process->win_h = WINDOW_DEFAULT_H;
+    process->win_x = 40 + slot * 48;
+    process->win_y = 30 + slot * 34;
+    process->mail_head = 0;
+    process->mail_tail = 0;
     process->state = PROC_RUNNABLE;
 
     c26_puts("CART START ");
@@ -580,7 +762,6 @@ void c26_cart_list_jobs(void)
 
 void c26_cart_schedule(void)
 {
-    /* Finalize kills requested against processes that are not running. */
     for (int i = 0; i < C26_NPROC; i++) {
         if (procs[i].state == PROC_RUNNABLE && procs[i].kill_pending) {
             finalize(i, -3);

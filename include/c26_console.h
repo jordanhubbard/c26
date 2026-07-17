@@ -16,6 +16,7 @@ typedef enum {
 void c26_console_clear(void);
 void c26_console_putc(char ch);
 void c26_console_render(void);
+void c26_console_render_cells(void); /* to the framebuffer, no present */
 int c26_console_dirty(void);
 void c26_console_flush(void);
 

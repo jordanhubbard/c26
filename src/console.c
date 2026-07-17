@@ -67,7 +67,7 @@ void c26_console_putc(char ch)
     dirty = 1;
 }
 
-void c26_console_render(void)
+void c26_console_render_cells(void)
 {
     c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, (int)C26_SCREEN_HEIGHT,
                   CONSOLE_BG);
@@ -84,6 +84,11 @@ void c26_console_render(void)
                   CONSOLE_ORIGIN_Y + (int)cursor_row * CONSOLE_CELL_HEIGHT,
                   CONSOLE_CELL_WIDTH - 1, CONSOLE_CELL_HEIGHT - 2, CONSOLE_FG);
     dirty = 0;
+}
+
+void c26_console_render(void)
+{
+    c26_console_render_cells();
     c26_framebuffer_present();
 }
 

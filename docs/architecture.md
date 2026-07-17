@@ -128,15 +128,21 @@ scheduler, and `yield` gives one up voluntarily. The kernel's context lives
 in globals rather than any process frame, so any process's fault, exit, or
 kill unwinds cleanly no matter which one was running.
 
-Each process owns a private 640x480 surface; drawing syscalls render there,
-and `present` marks damage. The compositor blits the focused surface to the
-scanout with a status bar naming the job. Focus routes input: the focused
-process sees `getchar` and mouse buttons, Tab (keyboard) or Ctrl-T (serial)
-cycle focus back to the BASIC console while every job keeps running, and
-Ctrl-C kills the focused job. `JOBS` lists them, `KILL n` stops one.
-`apps/ticker` makes the concurrency visible: its heartbeat interleaves with
-console output in the smoke gate. Message-passing IPC and movable window
-geometry are the next layer.
+Each process owns a private surface and a movable window: the BASIC console
+renders as the root layer and windows composite over it in z-order with
+borders and title bars. Drawing syscalls render into the surface, `present`
+marks damage, and apps lay themselves out to `window_size()` (ABI v2) with
+window-local mouse coordinates. Clicking focuses and raises a window;
+dragging the title bar moves it; clicking the console focuses it; Tab
+(keyboard) or Ctrl-T (serial) cycle focus — all while every job keeps
+running. Ctrl-C kills the focused job; `JOBS` lists them, `KILL n` stops
+one. `apps/ticker` makes the concurrency visible in the smoke gate, and the
+gate also checks that a window changes the composited framebuffer checksum.
+
+Jobs communicate through bounded mailboxes: `send(job, bytes)` and
+`recv(&from, buffer)` syscalls move up to 240-byte messages, four queued per
+process, copied by the kernel between address spaces. `apps/ping` and
+`apps/pong` prove the round trip in the smoke gate.
 
 BASIC stores up to 256 sorted numbered lines of 80 characters. `SAVE`
 serializes those lines into a C26FS file, while `LOAD` validates and rebuilds

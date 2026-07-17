@@ -55,10 +55,9 @@ FIRST_BOOT_MARKERS = [
 ]
 
 SECOND_BOOT_MARKERS = [
-    # DEMO + BOOT written by the guest, PAINT/CRASH/SPIN/TICKER installed
-    # host-side between boots — fsinstall.py modifying a guest-formatted
-    # filesystem.
-    "C26FS: mounted 6 file(s)",
+    # DEMO + BOOT written by the guest, six cartridges installed host-side
+    # between boots — fsinstall.py modifying a guest-formatted filesystem.
+    "C26FS: mounted 8 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -86,6 +85,12 @@ SECOND_BOOT_MARKERS = [
     "JOB 0  TICKER",
     "41001",
     "51001",
+    # Windows + IPC: PONG's window changes the composited framebuffer
+    # (checked via FB below) and answers PING across address spaces.
+    "PONG CART ONLINE",
+    "PING CART ONLINE",
+    "IPC ROUNDTRIP OK FROM JOB 0",
+    "71001",
 ]
 
 FIRST_BOOT_INPUT = """\
@@ -160,6 +165,9 @@ SECOND_BOOT_STAGES = [
     ('run "ticker"\n', 3.0),
     ('\x14jobs\nprint 41000+1\n', 4.0),
     ('kill 0\nprint 51000+1\n', 4.0),
+    ('print fb\nrun "pong"\n', 3.0),
+    ('\x14print fb\nrun "ping"\n', 4.0),
+    ('\x14kill 0\nprint 71000+1\n', 4.0),
 ]
 
 
@@ -301,7 +309,8 @@ def main() -> int:
 
     install = run(["python3", "scripts/fsinstall.py", str(DISK),
                    "PAINT=build/paint.cart", "CRASH=build/crash.cart",
-                   "SPIN=build/spin.cart", "TICKER=build/ticker.cart"])
+                   "SPIN=build/spin.cart", "TICKER=build/ticker.cart",
+                   "PING=build/ping.cart", "PONG=build/pong.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
@@ -318,11 +327,19 @@ def main() -> int:
         sys.stderr.write("\nno TICK after console interaction — "
                          "background job did not run concurrently\n")
         return 1
+    # Windowing proof: the composited framebuffer changes once PONG's
+    # window floats over the console.
+    window_sums = re.findall(r"PRINT FB\r?\n(\d+)", second_output)
+    if len(window_sums) < 2 or window_sums[-2] == window_sums[-1]:
+        sys.stderr.write(second_output)
+        sys.stderr.write("\nframebuffer unchanged by a window — "
+                         "compositor did not draw it\n")
+        return 1
 
     print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "
-          "persistence, and multiprocessing U-mode cartridges — clean run, "
-          "contained fault, preemptive kill, and a background job running "
-          "concurrently with the console")
+          "persistence, multiprocessing U-mode cartridges (clean run, "
+          "contained fault, preemptive kill, concurrent background job), "
+          "a window composited over the console, and an IPC round trip")
     return 0
 
 

@@ -45,11 +45,15 @@ the smoke gate's concurrency proof. Also: the full build harness (header
 deps, compile_commands.json, host-side unit tests for basic.c and fs.c,
 make check).
 
-## Remaining course (in priority order)
+## Delivered: M4b — windows + IPC, ABI v2 (2026-07-17)
 
-- **M4b — Window geometry + IPC.** Movable/sizable windows over the
-  per-process surfaces (z-order, hit-testing, decorations) and
-  message-passing IPC between processes.
+The console is the root layer; every process owns a movable, decorated
+window composited in z-order — click to focus and raise, drag the title bar
+to move, window-local mouse, window_size() layout (ABI v2). Bounded mailbox
+IPC (send/recv) between jobs; apps/ping + apps/pong gate the round trip and
+an FB checksum gates the compositing, headlessly.
+
+## Remaining course (in priority order)
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.
 - **M6 — App suite + networking.** virtio-net with a minimal honest IP

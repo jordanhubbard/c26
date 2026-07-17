@@ -27,12 +27,18 @@ host operating system.
   input and audio stay alive under a spinning app and Ctrl-C kills it
   (`apps/crash` and `apps/spin` prove both in the smoke gate).
 - Multiprocessing: up to four cartridges run concurrently in round-robin
-  time slices, each drawing to its own 640x480 surface; the compositor
-  shows the focused one with a status bar. All cartridges link at the same
-  address — per-process page tables map it to different physical slots.
-  Tab / Ctrl-T switch focus without stopping anything; `JOBS` lists and
-  `KILL n` terminates; `apps/ticker` prints a heartbeat that interleaves
-  with console work as the smoke gate's concurrency proof.
+  time slices. All cartridges link at the same address — per-process page
+  tables map it to different physical slots. Tab / Ctrl-T switch focus
+  without stopping anything; `JOBS` lists and `KILL n` terminates;
+  `apps/ticker` prints a heartbeat that interleaves with console work as
+  the smoke gate's concurrency proof.
+- A windowed desktop: the BASIC console is the root layer and every process
+  owns a movable, decorated window composited over it in z-order — click to
+  focus, drag the title bar to move. Apps query their window size (ABI v2)
+  and get window-local mouse coordinates.
+- IPC: bounded message passing between jobs (`send`/`recv` syscalls with
+  per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
+  across address spaces in the smoke gate.
 - 640x480 32-bit virtio-GPU scanout with software-buffer fallback, rendering
   a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with

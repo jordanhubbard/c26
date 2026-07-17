@@ -48,12 +48,15 @@ STUB(stub_fs_count, C26_SYS_FS_COUNT)
 STUB(stub_fs_entry, C26_SYS_FS_ENTRY)
 STUB(stub_dev_read8, C26_SYS_DEV_READ8)
 STUB(stub_dev_write8, C26_SYS_DEV_WRITE8)
+STUB(stub_window_size, C26_SYS_WINDOW_SIZE)
+STUB(stub_send, C26_SYS_SEND)
+STUB(stub_recv, C26_SYS_RECV)
 
     /* c26_api_t, field for field. */
     .align 3
     .globl c26_user_api
 c26_user_api:
-    .word 1                    /* version */
+    .word 2                    /* version */
     .word 0                    /* padding */
     .quad stub_puts
     .quad stub_putc
@@ -79,3 +82,6 @@ c26_user_api:
     .quad stub_fs_entry
     .quad stub_dev_read8
     .quad stub_dev_write8
+    .quad stub_window_size
+    .quad stub_send
+    .quad stub_recv

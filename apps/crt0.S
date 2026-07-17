@@ -1,6 +1,6 @@
     .section .cart_header, "a"
     .word 0x54524143              /* "CART" */
-    .word 1                       /* ABI version */
+    .word 2                       /* ABI version: C26_CART_VERSION */
     .word __cart_load_size
     .word __cart_bss_size
     .word _cart_entry - 0x88000000

@@ -37,6 +37,11 @@ static void draw_pointer(void)
     c26_draw_line(pointer_x, pointer_y + 14, pointer_x + 4, pointer_y + 10, 0xffffff);
 }
 
+void c26_desktop_draw_pointer(void)
+{
+    draw_pointer();
+}
+
 static void file_label(char *label, const char *name, uint32_t size)
 {
     size_t used = 0;
@@ -208,10 +213,17 @@ static void cart_event(c26_input_event_t event)
 {
     if (event.type == C26_INPUT_EVENT_RELATIVE) {
         move_pointer(event, 0);
+        c26_wm_pointer_moved(pointer_x, pointer_y);
         return;
     }
-    if (event.type != C26_INPUT_EVENT_KEY || event.value == 0 ||
-        event.code == BTN_LEFT) {
+    if (event.type != C26_INPUT_EVENT_KEY) {
+        return;
+    }
+    if (event.code == BTN_LEFT) {
+        c26_wm_click(pointer_x, pointer_y, event.value != 0);
+        return;
+    }
+    if (event.value == 0) {
         return;
     }
     if (event.code == KEY_TAB) {
@@ -238,7 +250,23 @@ static void cart_event(c26_input_event_t event)
 
 static void console_event(c26_input_event_t event)
 {
-    if (event.type != C26_INPUT_EVENT_KEY || event.value == 0) {
+    if (event.type == C26_INPUT_EVENT_RELATIVE) {
+        move_pointer(event, 0);
+        c26_wm_pointer_moved(pointer_x, pointer_y);
+        return;
+    }
+    if (event.type != C26_INPUT_EVENT_KEY) {
+        return;
+    }
+    if (event.code == BTN_LEFT) {
+        c26_wm_click(pointer_x, pointer_y, event.value != 0);
+        return;
+    }
+    if (event.value == 0) {
+        return;
+    }
+    if (event.code == KEY_TAB) {
+        c26_cart_focus_next();
         return;
     }
     if (event.code == KEY_ESC) {
@@ -322,12 +350,10 @@ void c26_desktop_poll(void)
        5 timer ticks so typing bursts and app frames stay responsive. */
     uint64_t now = c26_interrupt_ticks();
     if (now - last_flush_tick >= 5) {
-        if (c26_screen_mode() == C26_SCREEN_CART) {
+        c26_screen_mode_t mode = c26_screen_mode();
+        if (mode == C26_SCREEN_CONSOLE || mode == C26_SCREEN_CART) {
             last_flush_tick = now;
             c26_compositor_flush();
-        } else if (c26_console_dirty()) {
-            last_flush_tick = now;
-            c26_console_flush();
         }
     }
 }

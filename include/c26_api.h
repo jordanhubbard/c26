@@ -15,7 +15,7 @@
 #include <stdint.h>
 
 #define C26_CART_MAGIC 0x54524143U /* "CART" */
-#define C26_CART_VERSION 1U
+#define C26_CART_VERSION 2U
 #define C26_CART_BASE 0x88000000UL
 #define C26_CART_MAX_BYTES (2U * 1024U * 1024U)
 
@@ -74,6 +74,18 @@ typedef struct {
     /* Device fabric registers. */
     int (*dev_read8)(uint16_t reg, uint8_t *value);
     int (*dev_write8)(uint16_t reg, uint8_t value);
+
+    /* --- version 2: windows and IPC --- */
+
+    /* The app draws into [0,w) x [0,h) of its surface; the compositor shows
+       that region in a movable window. Mouse coordinates are window-local. */
+    void (*window_size)(uint32_t *width, uint32_t *height);
+
+    /* Nonblocking message passing between jobs. send returns 0 when the
+       target is gone or its mailbox is full; recv returns the byte count
+       or -1 when the mailbox is empty (from may be NULL). */
+    int (*send)(int job, const void *data, size_t size);
+    int (*recv)(int *from, void *data, size_t capacity);
 } c26_api_t;
 
 #endif
