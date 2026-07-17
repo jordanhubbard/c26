@@ -772,6 +772,44 @@ int c26_cart_any_runnable(void)
     return 0;
 }
 
+int c26_cart_move_window(int job, int x, int y)
+{
+    if (job < 0 || job >= C26_NPROC || procs[job].state != PROC_RUNNABLE) {
+        return 0;
+    }
+    procs[job].win_x = x;
+    procs[job].win_y = y;
+    scene_dirty = 1;
+    return 1;
+}
+
+int c26_cart_focus(int job)
+{
+    if (job < 0 || job >= C26_NPROC || procs[job].state != PROC_RUNNABLE) {
+        return 0;
+    }
+    focus_proc(job);
+    return 1;
+}
+
+int c26_cart_send(int job, const void *data, size_t size)
+{
+    if (job < 0 || job >= C26_NPROC || procs[job].state != PROC_RUNNABLE ||
+        size > MESSAGE_MAX) {
+        return 0;
+    }
+    proc_t *peer = &procs[job];
+    if (peer->mail_head - peer->mail_tail >= MAILBOX_SLOTS) {
+        return 0;
+    }
+    message_t *message = &peer->mail[peer->mail_head % MAILBOX_SLOTS];
+    message->from = 254; /* the console */
+    message->length = (uint16_t)size;
+    memcpy(message->data, data, size);
+    peer->mail_head++;
+    return 1;
+}
+
 int c26_cart_kill(int job)
 {
     if (job < 0 || job >= C26_NPROC || procs[job].state != PROC_RUNNABLE) {

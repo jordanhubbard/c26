@@ -63,9 +63,9 @@ FIRST_BOOT_MARKERS = [
 ]
 
 SECOND_BOOT_MARKERS = [
-    # DEMO + BOOT written by the guest, eleven cartridges installed
-    # host-side between boots.
-    "C26FS: mounted 13 file(s)",
+    # DEMO + HELLO.ASM + BOOT written by the guest, twelve cartridges
+    # installed host-side, HI assembled on the machine.
+    "C26FS: mounted 15 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -108,6 +108,14 @@ SECOND_BOOT_MARKERS = [
     "TRACKER CART EXIT",
     "BREAKOUT CART ONLINE",
     "BREAKOUT CART EXIT",
+    # M7 self-hosting: the on-board assembler turns HELLO.ASM into a
+    # cartridge, and RUN executes the machine-assembled code.
+    "ASM CART ONLINE",
+    "ASSEMBLED HELLO.ASM",
+    "HELLO FROM SELF-HOSTED CODE",
+    # M7 scriptable desktop: BASIC SEND delivers a message to a running
+    # job across address spaces.
+    "PONG GOT PING",
     # The M5 apps: EDIT saves a file typed through the toolkit; FILES lists
     # it, and its R action exercises the spawn syscall (DEMO is a BASIC
     # file, so the launcher's error path answers).
@@ -305,6 +313,13 @@ SECOND_BOOT_STAGES = [
     ('q', 2.0),
     ('run "breakout"\n', 3.0),
     ('q', 2.0),
+    ('run asm\n', 3.0),
+    ('hello.asm hi\n', 3.0),   # assemble the seeded source into a cartridge
+    ('q', 2.0),
+    ('run hi\n', 3.0),         # run the machine-assembled cartridge
+    ('run pong\n', 2.0),
+    ('\x14send 0,"PING"\n', 3.0),  # script a running job from BASIC
+    ('kill 0\n', 2.0),
     ('run "edit"\n', 3.0),
     ('SMOKE NOTE\x13', 2.0),   # type into EDIT, Ctrl-S saves
     ('\x11', 2.0),             # Ctrl-Q quits the editor
@@ -394,7 +409,8 @@ def main() -> int:
                    "PING=build/ping.cart", "PONG=build/pong.cart",
                    "FILES=build/files.cart", "EDIT=build/edit.cart",
                    "TRACKER=build/tracker.cart",
-                   "BREAKOUT=build/breakout.cart", "NET=build/net.cart"])
+                   "BREAKOUT=build/breakout.cart", "NET=build/net.cart",
+                   "ASM=build/asm.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)

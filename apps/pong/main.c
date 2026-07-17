@@ -25,6 +25,7 @@ int app_main(const c26_api_t *api)
         int length = api->recv(&from, buffer, sizeof(buffer) - 1);
         if (length == 4 && buffer[0] == 'P' && buffer[1] == 'I' &&
             buffer[2] == 'N' && buffer[3] == 'G') {
+            api->puts("PONG GOT PING\n");
             api->send(from, "PONG", 4);
             api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
             api->text(10, 10, "PONG: ANSWERED", 0x68f0c0, 0x0b1025, 2);

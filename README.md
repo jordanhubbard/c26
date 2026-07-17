@@ -45,6 +45,13 @@ host operating system.
   editor), `TRACKER` (an 8-voice step sequencer with saved patterns),
   `BREAKOUT` (mouse paddle, mixer sound effects), and `NET` (a UDP mailbox
   that ACKs every datagram reaching it from the host).
+- Self-hosting: `apps/asm` is a two-pass RV64 assembler that runs on the
+  machine, turning an assembly source file from C26FS into a runnable
+  cartridge (`RUN ASM`, type `HELLO.ASM HI`, then `RUN HI`). A fresh disk
+  seeds `HELLO.ASM` so the machine can program itself out of the box.
+- A scriptable desktop: BASIC statements `WINDOW j,x,y`, `FOCUS j`, and
+  `SEND j,"msg"` drive the window manager and inter-process messaging from
+  the built-in language.
 - Power control from inside the machine: `BYE`/`EXIT`/`QUIT`/`SHUTDOWN`
   say goodbye and power off through QEMU virt's SiFive test finisher;
   `HALT` is the blunt debug variant — immediate exit, no ceremony.

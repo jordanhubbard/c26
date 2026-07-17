@@ -130,7 +130,7 @@ static size_t valid_name_length(const char *name)
     while (name != 0 && name[length] != '\0') {
         char ch = name[length];
         if (!(ch >= 'A' && ch <= 'Z') && !(ch >= '0' && ch <= '9') &&
-            ch != '_' && ch != '-') {
+            ch != '_' && ch != '-' && ch != '.') {
             return 0;
         }
         if (++length > C26_FS_NAME_MAX) {

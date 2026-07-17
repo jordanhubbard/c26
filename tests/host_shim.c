@@ -141,6 +141,9 @@ void c26_desktop_invalidate(void) {}
 void c26_robot_demo(void) { c26_puts("ROBOT SDK DEMO\n"); }
 int c26_cart_run(const char *name) { (void)name; return -1; }
 int c26_cart_kill(int job) { (void)job; return 0; }
+int c26_cart_move_window(int j, int x, int y) { (void)j;(void)x;(void)y; return 0; }
+int c26_cart_focus(int j) { (void)j; return 0; }
+int c26_cart_send(int j, const void *d, size_t s) { (void)j;(void)d;(void)s; return 0; }
 void c26_cart_list_jobs(void) { c26_puts("  (NO JOBS)\n"); }
 void c26_cart_focus_console(void) {}
 void c26_cart_focus_next(void) {}

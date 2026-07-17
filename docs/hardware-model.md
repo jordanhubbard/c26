@@ -34,6 +34,8 @@ replacing magic memory addresses with typed SDK calls.
 | Applications | c26_ui toolkit; FILES browser/launcher (spawn), EDIT text editor |
 | Networking | virtio-net + ARP/ICMP/UDP; kernel echo :2600; app udp syscalls |
 | Power | BYE/HALT power off via the SiFive test finisher |
+| Self-hosting | On-board two-pass RV64 assembler builds runnable cartridges |
+| Scripting | BASIC WINDOW/FOCUS/SEND drive the window manager and IPC |
 | Display | 640x480x32 software surface on a virtio-GPU scanout |
 | Console | 100x45 scrolling text console, printable-ASCII 5x7 font |
 | 2D/3D | Pixel primitives, text, depth-tested colored triangles |

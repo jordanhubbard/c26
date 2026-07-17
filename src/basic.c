@@ -1100,6 +1100,54 @@ static exec_t exec_statement(const char *text, long pc)
         c26_robot_demo();
         return ok_next();
     }
+    if (keyword(line, "WINDOW")) {
+        p.cursor = line + 6;
+        int64_t values[3];
+        if (parse_arguments(&p, values, 3, 3) < 0) {
+            return fail(p.error != 0 ? p.error : "SYNTAX");
+        }
+        if (!c26_cart_move_window((int)values[0], (int)values[1],
+                                  (int)values[2])) {
+            return fail("ILLEGAL QUANTITY");
+        }
+        return ok_next();
+    }
+    if (keyword(line, "FOCUS")) {
+        p.cursor = line + 5;
+        int64_t values[1];
+        if (parse_arguments(&p, values, 1, 1) < 0) {
+            return fail(p.error != 0 ? p.error : "SYNTAX");
+        }
+        if (!c26_cart_focus((int)values[0])) {
+            return fail("ILLEGAL QUANTITY");
+        }
+        return ok_next();
+    }
+    if (keyword(line, "SEND")) {
+        p.cursor = line + 4;
+        int64_t job = parse_expr(&p);
+        if (p.error != 0 || !match_char(&p, ',')) {
+            return fail(p.error != 0 ? p.error : "SYNTAX");
+        }
+        const char *cursor = c26_skip_spaces(p.cursor);
+        if (*cursor != '"') {
+            return fail("SYNTAX");
+        }
+        cursor++;
+        char message[64];
+        size_t length = 0;
+        while (*cursor != '\0' && *cursor != '"' &&
+               length + 1 < sizeof(message)) {
+            message[length++] = *cursor++;
+        }
+        if (*cursor != '"') {
+            return fail("SYNTAX");
+        }
+        if (!c26_cart_send((int)job, message, length)) {
+            return fail("ILLEGAL QUANTITY");
+        }
+        return ok_next();
+    }
     if (keyword(line, "LET")) {
         p.cursor = line + 3;
         return exec_assign(&p);
@@ -1436,6 +1484,7 @@ static void process_line(const char *line)
     if (keyword(line, "HELP")) {
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
+        c26_puts("DESKTOP: WINDOW J,X,Y  FOCUS J  SEND J,\"MSG\"\n");
         c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" JOBS KILL BYE HELP\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB\n");
         return;
@@ -1584,6 +1633,23 @@ static const char demo_program[] =
     "150 SCREEN 0\n"
     "160 PRINT \"SELF DEMO COMPLETE\"\n";
 
+/* A source file the on-board assembler (RUN ASM) can turn into a runnable
+ * cartridge, so a fresh machine can demonstrate self-hosting out of the
+ * box: RUN ASM, type "HELLO HI", then RUN HI. */
+static const char hello_source[] =
+    "; assembled on the c26 itself by the ASM cartridge\n"
+    "MV S0, A0\n"
+    "ADDI SP, SP, -16\n"
+    "SD RA, 0(SP)\n"
+    "LA A0, MSG\n"
+    "LD T0, 8(S0)\n"
+    "JALR T0\n"
+    "LD RA, 0(SP)\n"
+    "ADDI SP, SP, 16\n"
+    "LI A0, 0\n"
+    "RET\n"
+    "MSG: .ASCIZ \"HELLO FROM SELF-HOSTED CODE\\N\"\n";
+
 void c26_basic_init(void)
 {
     c26_puts("C26 BASIC V3.0 - EXPRESSIONS, CONTROL FLOW, HARDWARE STATEMENTS\n");
@@ -1596,6 +1662,7 @@ void c26_basic_init(void)
             if (c26_fs_save("DEMO", demo_program, sizeof(demo_program) - 1)) {
                 c26_puts("C26FS: DEMO program installed\n");
             }
+            c26_fs_save("HELLO.ASM", hello_source, sizeof(hello_source) - 1);
         }
         c26_puts("TYPE LOAD DEMO THEN RUN FOR THE SELF DEMO\n");
     }

@@ -9,15 +9,16 @@ reachable from its built-in language. This is the property the industry
 abandoned when the PC lineage won; c26 exists to check whether abandoning
 it was necessary.
 
-## Scorecard (2026-07-17)
+## Scorecard (final, 2026-07-17)
 
 | Measure | Result |
 | --- | --- |
-| Kernel + SDK headers | ~6,700 lines of C and assembly |
-| Applications (toolkit + 11 cartridges) | ~1,100 lines |
-| Everything the guest runs | **~7,800 lines** — well under the 50k budget |
+| Kernel + SDK headers | ~7,000 lines of C and assembly |
+| Applications (toolkit + 12 cartridges, incl. an assembler) | ~1,700 lines |
+| Everything the guest runs | **~8,700 lines** — well under the 50k budget |
 | Boot to READY | under a second of guest time (QEMU virt, TCG) |
 | Syscall surface | 32 syscalls, one screen of c26_user.h |
+| Self-hosting | on-board RV64 assembler builds runnable cartridges |
 | Verification | make check: host unit tests + two-boot QEMU gate |
 
 ## What the machine does
@@ -56,11 +57,36 @@ code as user state; a UART fast path racing its own interrupt handler; a
 type-ahead drain that fed a queue back into itself. Each one now has a
 regression gate.
 
-## Verdict so far
+## Self-hosting and the scriptable desktop (M7)
 
-The hypothesis is holding with an order of magnitude to spare: ~7,800
-lines buy what 1982 could not imagine and 2026 buries under hundreds of
-millions. Remaining before the experiment closes: self-hosted development
-(an on-machine assembler producing runnable cartridges) and scripting the
-desktop from BASIC — the final test of "every capability reachable from
-the built-in language."
+Two properties close the experiment. First, the machine develops software
+for itself: `apps/asm` is a two-pass RV64 assembler that runs as a
+protected cartridge, reads an assembly source file from C26FS, and emits a
+runnable cartridge back to disk — `RUN ASM`, type `HELLO.ASM HI`, then
+`RUN HI` executes machine-assembled code in its own address space, exactly
+as the C64 shipped with the tools to program itself. Second, the desktop
+is scriptable from the built-in language: BASIC gained `WINDOW j,x,y`,
+`FOCUS j`, and `SEND j,"msg"`, so the window manager and inter-process
+messaging are reachable from the same prompt that draws pixels and plays
+notes. The smoke gate assembles HELLO.ASM on the machine, runs the result,
+and delivers a BASIC `SEND` to a running job across address spaces.
+
+## Verdict
+
+The hypothesis held, with an order of magnitude to spare. About 8,700
+lines of C and assembly — a codebase a single person can read across a
+weekend — deliver a memory-protected, preemptively multitasking, windowed,
+networked home computer that boots to READY in under a second, develops
+software for itself, and exposes every capability it has to a BASIC prompt
+a child could use. That combination was thought to require the complexity
+the PC lineage accreted; it did not. The property the industry abandoned
+when it chose that lineage — a whole machine one mind can hold — was not a
+casualty of capability but of business model. c26 is an existence proof
+that you can have both: the immediacy and legibility of 1982 with the
+protection, concurrency, graphics, and networking of 2026, and nothing in
+between that a curious person cannot open and understand.
+
+What remains is not proof but breadth: string variables and a full-screen
+program editor in BASIC, more of the IP stack (TCP, DNS), a richer
+assembler (more pseudo-ops, macros), and more applications. The
+foundation is done, and it is small enough to keep that way.

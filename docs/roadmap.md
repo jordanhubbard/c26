@@ -82,7 +82,17 @@ datagram — the smoke gate reaches it from the host through its U-mode udp
 syscalls). apps/lib/rt.c supplies freestanding memset/memcpy for
 cartridges. The experiment scorecard lives in docs/experiment.md.
 
-## Remaining course (in priority order)
+## Delivered: M7 — self-hosting + scriptable desktop (2026-07-17)
+
+apps/asm: a two-pass RV64 assembler that runs on the machine as a
+protected cartridge, assembling a C26FS source file into a runnable
+cartridge (RUN ASM -> "HELLO.ASM HI" -> RUN HI). A fresh disk seeds
+HELLO.ASM so self-hosting demonstrates out of the box. BASIC gained
+WINDOW/FOCUS/SEND so the window manager and IPC are scriptable from the
+built-in language. C26FS filenames now allow '.'. The experiment's closing
+verdict is in docs/experiment.md. **The charted course is complete.**
+
+## Optional follow-ups (foundation is done)
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.
 - **M6 — App suite + networking.** virtio-net with a minimal honest IP
