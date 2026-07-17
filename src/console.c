@@ -2,10 +2,11 @@
 #include "c26_console.h"
 #include "c26_graphics.h"
 
-#define CONSOLE_ORIGIN_X 20
-#define CONSOLE_ORIGIN_Y 15
-#define CONSOLE_CELL_WIDTH 6
-#define CONSOLE_CELL_HEIGHT 10
+#define CONSOLE_ORIGIN_X 40
+#define CONSOLE_ORIGIN_Y 30
+#define CONSOLE_CELL_WIDTH 12
+#define CONSOLE_CELL_HEIGHT 20
+#define CONSOLE_FONT_SCALE 2
 #define CONSOLE_FG 0xbac4ffU
 #define CONSOLE_BG 0x0b1025U
 
@@ -76,13 +77,14 @@ void c26_console_render_cells(void)
             if (cells[row][col] != ' ') {
                 c26_draw_char(CONSOLE_ORIGIN_X + (int)col * CONSOLE_CELL_WIDTH,
                               CONSOLE_ORIGIN_Y + (int)row * CONSOLE_CELL_HEIGHT,
-                              cells[row][col], CONSOLE_FG, CONSOLE_BG, 1);
+                              cells[row][col], CONSOLE_FG, CONSOLE_BG,
+                              CONSOLE_FONT_SCALE);
             }
         }
     }
     c26_fill_rect(CONSOLE_ORIGIN_X + (int)cursor_col * CONSOLE_CELL_WIDTH,
                   CONSOLE_ORIGIN_Y + (int)cursor_row * CONSOLE_CELL_HEIGHT,
-                  CONSOLE_CELL_WIDTH - 1, CONSOLE_CELL_HEIGHT - 2, CONSOLE_FG);
+                  CONSOLE_CELL_WIDTH - 2, CONSOLE_CELL_HEIGHT - 4, CONSOLE_FG);
     dirty = 0;
 }
 

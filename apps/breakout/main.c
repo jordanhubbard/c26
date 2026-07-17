@@ -15,15 +15,15 @@ static int running_game;
 static uint8_t bricks[BRICK_ROWS][BRICK_COLS];
 static uint64_t blip_until;
 
-static int field_top(void) { return 24; }
-static int field_h(void) { return (int)ui.height - 40; }
+static int field_top(void) { return 36; }
+static int field_h(void) { return (int)ui.height - 64; }
 
 static void reset_ball(void)
 {
     ball_x = (int)ui.width / 2;
-    ball_y = field_top() + 90;
-    ball_dx = 3;
-    ball_dy = 3;
+    ball_y = field_top() + 180;
+    ball_dx = 6;
+    ball_dy = 6;
 }
 
 static void reset_game(void)
@@ -57,18 +57,18 @@ static void draw(const c26_api_t *api)
     while (count != 0) title[used++] = digits[--count];
     title[used] = '\0';
     ui_titlebar(&ui, title, "R RESTART  Q QUIT");
-    int bw = ((int)ui.width - 12) / BRICK_COLS;
+    int bw = ((int)ui.width - 16) / BRICK_COLS;
     for (int r = 0; r < BRICK_ROWS; r++) {
         for (int c = 0; c < BRICK_COLS; c++) {
             if (!bricks[r][c]) continue;
             static const uint32_t colors[4] = {0xb86962, 0xffad45, 0xbfce72,
                                                0x68f0c0};
-            api->fill_rect(6 + c * bw, field_top() + 6 + r * 14, bw - 3, 11,
+            api->fill_rect(8 + c * bw, field_top() + 8 + r * 26, bw - 5, 20,
                            colors[r]);
         }
     }
-    api->fill_rect(paddle_x, field_top() + field_h() - 8, 56, 6, UI_BRIGHT);
-    api->fill_rect(ball_x - 3, ball_y - 3, 6, 6, UI_WARN);
+    api->fill_rect(paddle_x, field_top() + field_h() - 12, 100, 10, UI_BRIGHT);
+    api->fill_rect(ball_x - 5, ball_y - 5, 10, 10, UI_WARN);
     char status[24] = "LIVES ";
     status[6] = (char)('0' + lives);
     status[7] = '\0';
@@ -81,7 +81,7 @@ static void step(const c26_api_t *api)
     if (!running_game) return;
     ball_x += ball_dx;
     ball_y += ball_dy;
-    int left = 6, right = (int)ui.width - 6;
+    int left = 8, right = (int)ui.width - 8;
     int top = field_top() + 4, bottom = field_top() + field_h();
     if (ball_x <= left || ball_x >= right) {
         ball_dx = -ball_dx;
@@ -91,19 +91,19 @@ static void step(const c26_api_t *api)
         ball_dy = -ball_dy;
         blip(api, 330);
     }
-    int paddle_y = bottom - 8;
-    if (ball_y >= paddle_y - 3 && ball_y <= paddle_y + 3 &&
-        ball_x >= paddle_x - 3 && ball_x <= paddle_x + 59 && ball_dy > 0) {
+    int paddle_y = bottom - 12;
+    if (ball_y >= paddle_y - 5 && ball_y <= paddle_y + 5 &&
+        ball_x >= paddle_x - 5 && ball_x <= paddle_x + 105 && ball_dy > 0) {
         ball_dy = -ball_dy;
-        ball_dx += (ball_x - (paddle_x + 28)) / 12;
-        if (ball_dx > 5) ball_dx = 5;
-        if (ball_dx < -5) ball_dx = -5;
+        ball_dx += (ball_x - (paddle_x + 50)) / 20;
+        if (ball_dx > 9) ball_dx = 9;
+        if (ball_dx < -9) ball_dx = -9;
         if (ball_dx == 0) ball_dx = 1;
         blip(api, 262);
     }
-    int bw = ((int)ui.width - 12) / BRICK_COLS;
-    int brick_row = (ball_y - field_top() - 6) / 14;
-    int brick_col = (ball_x - 6) / bw;
+    int bw = ((int)ui.width - 16) / BRICK_COLS;
+    int brick_row = (ball_y - field_top() - 8) / 26;
+    int brick_col = (ball_x - 8) / bw;
     if (brick_row >= 0 && brick_row < BRICK_ROWS && brick_col >= 0 &&
         brick_col < BRICK_COLS && bricks[brick_row][brick_col]) {
         bricks[brick_row][brick_col] = 0;
@@ -145,7 +145,7 @@ int app_main(const c26_api_t *api)
         api->mouse(&mouse_x, &mouse_y, &buttons);
         (void)mouse_y;
         (void)buttons;
-        if (mouse_x >= 0 && mouse_x < (int)ui.width - 56) paddle_x = mouse_x;
+        if (mouse_x >= 0 && mouse_x < (int)ui.width - 100) paddle_x = mouse_x;
         uint64_t now = api->ticks();
         if (now >= next_frame) {
             next_frame = now + 2;

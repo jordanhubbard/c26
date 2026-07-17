@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define C26_SCREEN_WIDTH 640U
-#define C26_SCREEN_HEIGHT 480U
+#define C26_SCREEN_WIDTH 1280U
+#define C26_SCREEN_HEIGHT 960U
 
 typedef struct {
     int32_t x;

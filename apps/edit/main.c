@@ -7,8 +7,8 @@
 #include "ui.h"
 
 #define BUFFER_MAX 8000
-#define TEXT_Y 26
-#define LINE_HEIGHT 12
+#define TEXT_Y 38
+#define LINE_HEIGHT 22
 
 static c26_ui_t ui;
 static char text[BUFFER_MAX + 1];
@@ -43,8 +43,8 @@ static void cursor_place(int *line, int *column)
 
 static void redraw(const c26_api_t *api, const char *status, uint32_t color)
 {
-    int rows = ((int)ui.height - TEXT_Y - 16) / LINE_HEIGHT;
-    int columns = ((int)ui.width - 12) / 6;
+    int rows = ((int)ui.height - TEXT_Y - 26) / LINE_HEIGHT;
+    int columns = ((int)ui.width - 16) / 12;
     int line;
     int column;
     cursor_place(&line, &column);
@@ -76,11 +76,11 @@ static void redraw(const c26_api_t *api, const char *status, uint32_t color)
         visible[visible_length] = '\0';
         while (position < length && text[position] != '\n') position++;
         if (position < length) position++;
-        api->text(6, TEXT_Y + row * LINE_HEIGHT, visible, UI_TEXT, UI_BG, 1);
+        api->text(8, TEXT_Y + row * LINE_HEIGHT, visible, UI_TEXT, UI_BG, 2);
         int this_line = top_line + row;
         if (this_line == line && column <= columns) {
-            api->fill_rect(6 + column * 6,
-                           TEXT_Y + row * LINE_HEIGHT + 9, 6, 2, UI_BRIGHT);
+            api->fill_rect(8 + column * 12,
+                           TEXT_Y + row * LINE_HEIGHT + 17, 12, 3, UI_BRIGHT);
         }
     }
     ui_status(&ui, status, color);

@@ -1,6 +1,6 @@
 #include "ui.h"
 
-#define ROW_HEIGHT 14
+#define ROW_HEIGHT 26
 
 void ui_init(c26_ui_t *ui, const c26_api_t *api)
 {
@@ -48,30 +48,30 @@ void ui_clear(c26_ui_t *ui)
 
 void ui_titlebar(c26_ui_t *ui, const char *title, const char *hint)
 {
-    ui->api->fill_rect(0, 0, (int)ui->width, 20, UI_PANEL);
-    ui->api->text(6, 3, title, UI_BRIGHT, UI_PANEL, 2);
+    ui->api->fill_rect(0, 0, (int)ui->width, 30, UI_PANEL);
+    ui->api->text(8, 5, title, UI_BRIGHT, UI_PANEL, 3);
     if (hint != 0) {
         int x = (int)ui->width - 6 * (int)0;
         (void)x;
         int length = 0;
         while (hint[length] != '\0') length++;
-        ui->api->text((int)ui->width - 6 * length - 6, 7, hint, UI_TEXT,
-                      UI_PANEL, 1);
+        ui->api->text((int)ui->width - 12 * length - 8, 9, hint, UI_TEXT,
+                      UI_PANEL, 2);
     }
     ui->dirty = 1;
 }
 
 void ui_text(c26_ui_t *ui, int x, int y, const char *text, uint32_t color)
 {
-    ui->api->text(x, y, text, color, UI_BG, 1);
+    ui->api->text(x, y, text, color, UI_BG, 2);
     ui->dirty = 1;
 }
 
 void ui_status(c26_ui_t *ui, const char *text, uint32_t color)
 {
-    int y = (int)ui->height - 14;
-    ui->api->fill_rect(0, y, (int)ui->width, 14, UI_PANEL);
-    ui->api->text(6, y + 3, text, color, UI_PANEL, 1);
+    int y = (int)ui->height - 24;
+    ui->api->fill_rect(0, y, (int)ui->width, 24, UI_PANEL);
+    ui->api->text(8, y + 5, text, color, UI_PANEL, 2);
     ui->dirty = 1;
 }
 
@@ -85,7 +85,7 @@ int ui_row(c26_ui_t *ui, int y, const char *text, int selected)
 {
     uint32_t bg = selected ? UI_ACCENT : UI_BG;
     ui->api->fill_rect(4, y, (int)ui->width - 8, ROW_HEIGHT, bg);
-    ui->api->text(10, y + 3, text, selected ? UI_BRIGHT : UI_TEXT, bg, 1);
+    ui->api->text(12, y + 5, text, selected ? UI_BRIGHT : UI_TEXT, bg, 2);
     ui->dirty = 1;
     return ui_hit(ui, 4, y, (int)ui->width - 8, ROW_HEIGHT);
 }

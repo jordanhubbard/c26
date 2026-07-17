@@ -23,10 +23,10 @@
 #define EXIT_SLICE 0x7fff0001L
 #define SURFACE_PIXELS (C26_SCREEN_WIDTH * C26_SCREEN_HEIGHT)
 
-#define TITLE_HEIGHT 14
+#define TITLE_HEIGHT 26
 #define BORDER 1
-#define WINDOW_DEFAULT_W 420
-#define WINDOW_DEFAULT_H 300
+#define WINDOW_DEFAULT_W 840
+#define WINDOW_DEFAULT_H 620
 #define MAILBOX_SLOTS 4U
 #define MESSAGE_MAX 240U
 
@@ -238,8 +238,8 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
     c26_fill_rect(process->win_x + BORDER, process->win_y + BORDER,
                   process->win_w, TITLE_HEIGHT - BORDER,
                   is_focused ? 0x35409a : 0x222957);
-    c26_draw_text(process->win_x + 6, process->win_y + 4, process->name,
-                  0xffffff, is_focused ? 0x35409a : 0x222957, 1);
+    c26_draw_text(process->win_x + 8, process->win_y + 6, process->name,
+                  0xffffff, is_focused ? 0x35409a : 0x222957, 2);
 
     for (int row = 0; row < process->win_h; row++) {
         int dst_y = content_y + row;
@@ -747,8 +747,8 @@ int c26_cart_run(const char *name)
     process->surface_damaged = 1;
     process->win_w = WINDOW_DEFAULT_W;
     process->win_h = WINDOW_DEFAULT_H;
-    process->win_x = 40 + slot * 48;
-    process->win_y = 30 + slot * 34;
+    process->win_x = 80 + slot * 96;
+    process->win_y = 60 + slot * 68;
     process->mail_head = 0;
     process->mail_tail = 0;
     process->state = PROC_RUNNABLE;

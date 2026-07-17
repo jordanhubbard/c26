@@ -6,7 +6,7 @@
 #include "ui.h"
 
 #define MAX_ROWS 16
-#define LIST_Y 26
+#define LIST_Y 38
 
 static c26_ui_t ui;
 static int selected;
@@ -44,7 +44,7 @@ static void redraw(const c26_api_t *api, const char *status, uint32_t color)
         if (!api->fs_entry((size_t)(top + row), &name, &size)) continue;
         char label[40];
         format_row(label, name, size);
-        if (ui_row(&ui, LIST_Y + row * 14, label, top + row == selected)) {
+        if (ui_row(&ui, LIST_Y + row * 26, label, top + row == selected)) {
             selected = top + row;
         }
     }

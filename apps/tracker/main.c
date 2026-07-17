@@ -30,15 +30,15 @@ static void draw(const c26_api_t *api)
     ui_clear(&ui);
     ui_titlebar(&ui, "TRACKER", "SPC PLAY  A/Z NOTE  ^S SAVE  Q QUIT");
     for (int voice = 0; voice < VOICES; voice++) {
-        int y = 28 + voice * 18;
+        int y = 42 + voice * 34;
         char label[4] = {'V', (char)('0' + voice), 0, 0};
-        api->text(6, y + 3, label, UI_TEXT, UI_BG, 1);
+        api->text(8, y + 6, label, UI_TEXT, UI_BG, 2);
         for (int step = 0; step < STEPS; step++) {
-            int x = 26 + step * 24;
+            int x = 44 + step * 48;
             uint32_t bg = UI_BG;
             if (playing && step == play_step) bg = 0x2c5a3c;
             if (voice == cursor_voice && step == cursor_step) bg = UI_ACCENT;
-            api->fill_rect(x, y, 22, 16, bg);
+            api->fill_rect(x, y, 44, 30, bg);
             uint8_t note = grid[voice][step];
             if (note != 0) {
                 char cell[4];
@@ -46,9 +46,9 @@ static void draw(const c26_api_t *api)
                 cell[1] = note_names[(note - 1) % 12][1];
                 cell[2] = (char)('3' + (note - 1) / 12);
                 cell[3] = '\0';
-                api->text(x + 2, y + 4, cell, UI_BRIGHT, bg, 1);
+                api->text(x + 4, y + 7, cell, UI_BRIGHT, bg, 2);
             } else {
-                api->text(x + 5, y + 4, "..", 0x505a8c, bg, 1);
+                api->text(x + 10, y + 7, "..", 0x505a8c, bg, 2);
             }
         }
     }
