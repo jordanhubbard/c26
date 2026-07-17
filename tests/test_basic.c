@@ -188,6 +188,18 @@ int main(void)
     command("list");
     expect_absent("10 PRINT 1", "line delete");
 
+    /* Line editor: cursor movement, mid-line insert/delete, history. */
+    command("print 3\x1f""12"); /* left once, insert before the 3 */
+    expect("123\n", "insert before cursor");
+    command("print 45\b6");
+    expect("46\n", "backspace mid-entry");
+    shim_output_reset();
+    feed("\x1c\n"); /* up-arrow recalls PRINT 46 */
+    expect("46\n", "history recall");
+    shim_output_reset();
+    feed("print 8\x1b[D9\n"); /* ANSI left-arrow from a terminal */
+    expect("98\n", "ansi escape arrows");
+
     /* Devices */
     command("device write 200 77");
     expect("DEVICE WRITE OK", "device write");

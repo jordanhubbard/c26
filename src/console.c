@@ -46,9 +46,9 @@ void c26_console_putc(char ch)
         cursor_col = 0;
         cursor_row++;
     } else if (ch == '\b') {
+        /* Move left without erasing (like a terminal); erase is "\b \b". */
         if (cursor_col != 0) {
             cursor_col--;
-            cells[cursor_row][cursor_col] = ' ';
         }
     } else if (ch >= ' ' && ch <= '~') {
         cells[cursor_row][cursor_col] = ch;

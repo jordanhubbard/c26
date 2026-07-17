@@ -45,6 +45,11 @@ typedef struct {
 static int64_t vars[26];
 static char input_line[96];
 static size_t input_length;
+static size_t input_cursor;
+static char history[4][96];
+static int history_count;
+static int history_browse; /* -1 = not browsing */
+static int escape_state;   /* serial ANSI arrows: 0 none, 1 ESC, 2 ESC[ */
 static basic_line_t program[BASIC_LINE_COUNT];
 static size_t program_count;
 static char file_buffer[C26_FS_FILE_MAX + 1];
@@ -1323,20 +1328,26 @@ static void process_line(const char *line)
     }
     if (keyword(line, "RUN")) {
         const char *cursor = c26_skip_spaces(line + 3);
-        if (*cursor == '"') {
+        if (*cursor == '"' || is_upper(*cursor)) {
+            /* RUN "NAME" or bare RUN NAME launches a cartridge. */
+            int quoted = *cursor == '"';
+            if (quoted) cursor++;
             char name[C26_FS_NAME_MAX + 1];
             size_t length = 0;
-            cursor++;
-            while (*cursor != '\0' && *cursor != '"' &&
+            while (*cursor != '\0' && *cursor != '"' && *cursor != ' ' &&
                    length < C26_FS_NAME_MAX) {
                 name[length++] = *cursor++;
             }
             name[length] = '\0';
-            if (*cursor != '"' || length == 0) {
-                c26_puts("Usage: RUN \"NAME\"\n");
+            if ((quoted && *cursor != '"') || length == 0) {
+                c26_puts("Usage: RUN or RUN NAME\n");
                 return;
             }
             c26_cart_run(name);
+            return;
+        }
+        if (*cursor != '\0') {
+            c26_puts("Usage: RUN or RUN NAME\n");
             return;
         }
         run_program();
@@ -1444,6 +1455,117 @@ static void prompt(void)
     c26_puts("] ");
 }
 
+/* ------------------------------------------------------------------ */
+/* Line editor: cursor movement, mid-line insert/delete, history       */
+
+static void editor_repaint_tail(size_t from, int trailing_blank)
+{
+    for (size_t i = from; i < input_length; i++) {
+        c26_putc(input_line[i]);
+    }
+    if (trailing_blank) {
+        c26_putc(' ');
+        c26_putc('\b');
+    }
+    for (size_t i = from; i < input_length; i++) {
+        c26_putc('\b');
+    }
+}
+
+static void editor_insert(char ch)
+{
+    if (input_length + 1 >= sizeof(input_line)) {
+        return;
+    }
+    for (size_t i = input_length; i > input_cursor; i--) {
+        input_line[i] = input_line[i - 1];
+    }
+    input_line[input_cursor] = ch;
+    input_length++;
+    input_cursor++;
+    c26_putc(ch);
+    editor_repaint_tail(input_cursor, 0);
+}
+
+static void editor_erase(void)
+{
+    if (input_cursor == 0) {
+        return;
+    }
+    for (size_t i = input_cursor; i < input_length; i++) {
+        input_line[i - 1] = input_line[i];
+    }
+    input_cursor--;
+    input_length--;
+    c26_putc('\b');
+    editor_repaint_tail(input_cursor, 1);
+}
+
+static void editor_set_line(const char *text)
+{
+    while (input_cursor < input_length) {
+        c26_putc(input_line[input_cursor++]);
+    }
+    while (input_length != 0) {
+        c26_puts("\b \b");
+        input_length--;
+    }
+    input_cursor = 0;
+    while (text[input_length] != '\0' &&
+           input_length + 1 < sizeof(input_line)) {
+        input_line[input_length] = text[input_length];
+        c26_putc(text[input_length]);
+        input_length++;
+    }
+    input_cursor = input_length;
+}
+
+static int lines_equal(const char *left, const char *right)
+{
+    while (*left != '\0' && *left == *right) {
+        left++;
+        right++;
+    }
+    return *left == *right;
+}
+
+static void editor_history_add(const char *text)
+{
+    if (text[0] == '\0' ||
+        (history_count > 0 &&
+         lines_equal(history[(history_count - 1) % 4], text))) {
+        return;
+    }
+    size_t i = 0;
+    while (text[i] != '\0' && i + 1 < sizeof(history[0])) {
+        history[history_count % 4][i] = text[i];
+        i++;
+    }
+    history[history_count % 4][i] = '\0';
+    history_count++;
+}
+
+static void editor_history_browse(int direction)
+{
+    if (history_count == 0) {
+        return;
+    }
+    int oldest = history_count > 4 ? history_count - 4 : 0;
+    if (history_browse < 0) {
+        if (direction > 0) return;
+        history_browse = history_count - 1;
+    } else {
+        history_browse += direction;
+    }
+    if (history_browse < oldest) history_browse = oldest;
+    if (history_browse >= history_count) {
+        history_browse = -1;
+        editor_set_line("");
+        return;
+    }
+    editor_set_line(history[history_browse % 4]);
+}
+
 static const char demo_program[] =
     "10 REM C26 SELF DEMO\n"
     "20 SCREEN 1\n"
@@ -1480,6 +1602,7 @@ void c26_basic_init(void)
     c26_puts("BASIC INTERACTIVE READY - TYPE HELP\n");
     c26_puts("READY\n");
     input_length = 0;
+    input_cursor = 0;
     prompt();
 }
 
@@ -1541,23 +1664,61 @@ void c26_basic_feed_char(char ch)
         queue_push(ch);
         return;
     }
+    /* Serial terminals send arrows as ESC [ A/B/C/D; fold them into the
+       same codes the virtio keyboard delivers. */
+    if (escape_state == 1) {
+        escape_state = ch == '[' ? 2 : 0;
+        if (escape_state != 0 || ch == 0x1b) return;
+    } else if (escape_state == 2) {
+        escape_state = 0;
+        if (ch == 'A') ch = 0x1c;
+        else if (ch == 'B') ch = 0x1d;
+        else if (ch == 'C') ch = 0x1e;
+        else if (ch == 'D') ch = 0x1f;
+        else return;
+    } else if (ch == 0x1b) {
+        escape_state = 1;
+        return;
+    }
+
     if (ch == '\n') {
         c26_putc('\n');
         input_line[input_length] = '\0';
+        editor_history_add(input_line);
+        history_browse = -1;
         input_length = 0;
+        input_cursor = 0;
         process_line(input_line);
         prompt();
         return;
     }
     if (ch == '\b' || ch == 0x7f) {
-        if (input_length != 0) {
-            input_length--;
-            c26_puts("\b \b");
+        editor_erase();
+        return;
+    }
+    if (ch == 0x1c) { /* up: previous history entry */
+        editor_history_browse(-1);
+        return;
+    }
+    if (ch == 0x1d) { /* down: next history entry */
+        editor_history_browse(1);
+        return;
+    }
+    if (ch == 0x1f) { /* left */
+        if (input_cursor != 0) {
+            input_cursor--;
+            c26_putc('\b');
         }
         return;
     }
-    if (ch < 32 || ch > 126 || input_length + 1 >= sizeof(input_line)) return;
+    if (ch == 0x1e) { /* right */
+        if (input_cursor < input_length) {
+            c26_putc(input_line[input_cursor]);
+            input_cursor++;
+        }
+        return;
+    }
+    if (ch < 32 || ch > 126) return;
     if (ch >= 'a' && ch <= 'z') ch -= ('a' - 'A');
-    input_line[input_length++] = ch;
-    c26_putc(ch);
+    editor_insert(ch);
 }
