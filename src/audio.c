@@ -355,4 +355,10 @@ void c26_audio_demo(void)
     c26_puts("AUDIO DSP CHECKSUM: ");
     c26_put_hex(checksum);
     c26_uart_putc('\n');
+
+    /* The checksum voices were a verification vector, not a soundtrack —
+       silence them so the machine boots quiet. */
+    c26_audio_voice_stop(0);
+    c26_audio_voice_stop(1);
+    c26_audio_voice_stop(2);
 }

@@ -6,6 +6,7 @@
 #include "c26_devices.h"
 #include "c26_graphics.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 char shim_output[65536];
@@ -143,6 +144,7 @@ int c26_cart_kill(int job) { (void)job; return 0; }
 void c26_cart_list_jobs(void) { c26_puts("  (NO JOBS)\n"); }
 void c26_cart_focus_console(void) {}
 void c26_cart_focus_next(void) {}
+void c26_poweroff(void) { exit(0); }
 
 /* Graphics */
 uint32_t *c26_framebuffer_pixels(void) { return pixels; }

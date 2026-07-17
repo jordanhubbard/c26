@@ -127,3 +127,13 @@ void c26_idle(void)
 {
     __asm__ volatile("wfi");
 }
+
+void c26_poweroff(void)
+{
+    /* SiFive test finisher on QEMU virt: a real emulated device whose
+       0x5555 command powers the machine off. */
+    *(volatile uint32_t *)0x100000UL = 0x5555;
+    for (;;) {
+        __asm__ volatile("wfi");
+    }
+}

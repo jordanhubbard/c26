@@ -1360,6 +1360,12 @@ static void process_line(const char *line)
         list_files();
         return;
     }
+    if (keyword(line, "BYE") || keyword(line, "EXIT") ||
+        keyword(line, "QUIT") || keyword(line, "SHUTDOWN")) {
+        c26_puts("SHUTTING DOWN - GOODBYE\n");
+        c26_console_flush();
+        c26_poweroff();
+    }
     if (keyword(line, "JOBS")) {
         c26_puts("JOBS:\n");
         c26_cart_list_jobs();
@@ -1415,7 +1421,7 @@ static void process_line(const char *line)
     if (keyword(line, "HELP")) {
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
-        c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" JOBS KILL HELP\n");
+        c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" JOBS KILL BYE HELP\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB\n");
         return;
     }
@@ -1455,6 +1461,7 @@ static const char demo_program[] =
 void c26_basic_init(void)
 {
     c26_puts("C26 BASIC V3.0 - EXPRESSIONS, CONTROL FLOW, HARDWARE STATEMENTS\n");
+    c26_puts("TYPE HELP FOR COMMANDS, BYE TO POWER OFF, ESC FOR THE DESKTOP\n");
     program_count = 0;
     rng_state = c26_interrupt_ticks() * 6364136223846793005ULL + 1;
     if (c26_fs_online()) {

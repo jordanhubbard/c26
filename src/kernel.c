@@ -25,6 +25,9 @@ void kmain(void)
     c26_putc('\n');
 
     c26_puts("C26 INTERACTIVE LOOP ONLINE\n");
+    /* The boot transcript stays on the serial console; the display boots
+       to a clean screen like a home computer should. */
+    c26_console_clear();
     c26_screen_set_mode(C26_SCREEN_CONSOLE);
     c26_basic_init();
     c26_console_flush();
