@@ -255,6 +255,11 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
     }
 }
 
+void c26_compositor_mark_dirty(void)
+{
+    scene_dirty = 1;
+}
+
 void c26_compositor_flush(void)
 {
     c26_screen_mode_t mode = c26_screen_mode();

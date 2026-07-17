@@ -47,6 +47,7 @@ void c26_cart_list_jobs(void);
 void c26_cart_focus_console(void);
 void c26_cart_focus_next(void);
 void c26_compositor_flush(void);
+void c26_compositor_mark_dirty(void);
 int c26_wm_click(int x, int y, int pressed);
 void c26_wm_pointer_moved(int x, int y);
 void c26_desktop_draw_pointer(void);

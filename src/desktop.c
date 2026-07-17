@@ -368,12 +368,31 @@ void c26_desktop_poll(void)
     /* Presenting is a full-screen GPU transfer; cap it at one render per
        5 timer ticks so typing bursts and app frames stay responsive. */
     uint64_t now = c26_interrupt_ticks();
+    /* Display heartbeat: repaint the whole scene once a second even with
+       no damage, so a present dropped while the host window was still
+       being created (seen with the cocoa display) heals instead of
+       leaving a permanently blank screen. */
+    static uint64_t last_heartbeat_tick;
+    c26_screen_mode_t mode = c26_screen_mode();
+    if (now - last_heartbeat_tick >= 100) {
+        last_heartbeat_tick = now;
+        if (mode == C26_SCREEN_CONSOLE || mode == C26_SCREEN_CART) {
+            c26_compositor_mark_dirty();
+        } else if (mode == C26_SCREEN_DESKTOP) {
+            redraw_requested = 1;
+        } else {
+            c26_framebuffer_present();
+        }
+    }
     if (now - last_flush_tick >= 5) {
-        c26_screen_mode_t mode = c26_screen_mode();
         if (mode == C26_SCREEN_CONSOLE || mode == C26_SCREEN_CART) {
             last_flush_tick = now;
             c26_compositor_flush();
         }
+    }
+    if (mode == C26_SCREEN_DESKTOP && redraw_requested) {
+        redraw_requested = 0;
+        render_desktop();
     }
 }
 
