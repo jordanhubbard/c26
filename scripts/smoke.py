@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ELF = ROOT / "build" / "c26.elf"
 DISK = ROOT / "build" / "c26-smoke.img"
 UDP_PORT = 12000 + (os.getpid() % 3000)
+NET_APP_PORT = UDP_PORT + 1
 udp_echo_reply = b""
+net_app_reply = b""
 
 FIRST_BOOT_MARKERS = [
     "C26 RISC-V HOME COMPUTER",
@@ -61,9 +63,9 @@ FIRST_BOOT_MARKERS = [
 ]
 
 SECOND_BOOT_MARKERS = [
-    # DEMO + BOOT written by the guest, eight cartridges installed host-side
-    # between boots — fsinstall.py modifying a guest-formatted filesystem.
-    "C26FS: mounted 10 file(s)",
+    # DEMO + BOOT written by the guest, eleven cartridges installed
+    # host-side between boots.
+    "C26FS: mounted 13 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -97,6 +99,15 @@ SECOND_BOOT_MARKERS = [
     "PING CART ONLINE",
     "IPC ROUNDTRIP OK FROM JOB 0",
     "71001",
+    # The M6 suite: the NET app ACKs a real datagram from U-mode, the
+    # tracker and the game come up and exit cleanly.
+    "NET CART ONLINE",
+    "NET RX HI-C26",
+    "NET CART EXIT",
+    "TRACKER CART ONLINE",
+    "TRACKER CART EXIT",
+    "BREAKOUT CART ONLINE",
+    "BREAKOUT CART EXIT",
     # The M5 apps: EDIT saves a file typed through the toolkit; FILES lists
     # it, and its R action exercises the spawn syscall (DEMO is a BASIC
     # file, so the launcher's error path answers).
@@ -216,7 +227,8 @@ def qemu_command() -> list[str]:
         "-device",
         "virtio-blk-device,drive=c26disk",
         "-netdev",
-        f"user,id=net0,hostfwd=udp:127.0.0.1:{UDP_PORT}-:2600",
+        f"user,id=net0,hostfwd=udp:127.0.0.1:{UDP_PORT}-:2600,"
+        f"hostfwd=udp:127.0.0.1:{NET_APP_PORT}-:2601",
         "-device",
         "virtio-net-device,netdev=net0",
     ]
@@ -232,19 +244,31 @@ def boot(input_text: str, timeout: float) -> str:
         return stdout + stderr
 
 
-def udp_echo_probe() -> None:
-    """Send a datagram through hostfwd to the guest's echo service."""
-    global udp_echo_reply
+def udp_probe(port: int, payload: bytes) -> bytes:
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     probe.settimeout(2.0)
+    reply = b""
     for _ in range(4):
         try:
-            probe.sendto(b"C26-NET-PING", ("127.0.0.1", UDP_PORT))
-            udp_echo_reply, _ = probe.recvfrom(64)
+            probe.sendto(payload, ("127.0.0.1", port))
+            reply, _ = probe.recvfrom(80)
             break
         except OSError:
             continue
     probe.close()
+    return reply
+
+
+def udp_echo_probe() -> None:
+    """The kernel echo service answers a datagram through hostfwd."""
+    global udp_echo_reply
+    udp_echo_reply = udp_probe(UDP_PORT, b"C26-NET-PING")
+
+
+def net_app_probe() -> None:
+    """The NET cartridge (U-mode, via udp syscalls) ACKs a datagram."""
+    global net_app_reply
+    net_app_reply = udp_probe(NET_APP_PORT, b"HI-C26")
 
 
 # Ctrl-C is a real-time signal, not a queued character: it kills whichever
@@ -273,6 +297,14 @@ SECOND_BOOT_STAGES = [
     ('\x14print fb\nrun "ping"\n', 4.0),
     ('\x14kill 0\nprint 71000+1\n', 4.0),
     (udp_echo_probe, 1.0),
+    ('run "net"\n', 3.0),
+    (net_app_probe, 1.0),
+    ('q', 2.0),
+    ('run "tracker"\n', 3.0),
+    (' ', 1.5),                # play the pattern for a beat
+    ('q', 2.0),
+    ('run "breakout"\n', 3.0),
+    ('q', 2.0),
     ('run "edit"\n', 3.0),
     ('SMOKE NOTE\x13', 2.0),   # type into EDIT, Ctrl-S saves
     ('\x11', 2.0),             # Ctrl-Q quits the editor
@@ -360,7 +392,9 @@ def main() -> int:
                    "PAINT=build/paint.cart", "CRASH=build/crash.cart",
                    "SPIN=build/spin.cart", "TICKER=build/ticker.cart",
                    "PING=build/ping.cart", "PONG=build/pong.cart",
-                   "FILES=build/files.cart", "EDIT=build/edit.cart"])
+                   "FILES=build/files.cart", "EDIT=build/edit.cart",
+                   "TRACKER=build/tracker.cart",
+                   "BREAKOUT=build/breakout.cart", "NET=build/net.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
@@ -390,6 +424,10 @@ def main() -> int:
     if udp_echo_reply != b"C26-NET-PING":
         sys.stderr.write(second_output)
         sys.stderr.write(f"\nUDP echo failed: got {udp_echo_reply!r}\n")
+        return 1
+    if net_app_reply != b"ACK:HI-C26":
+        sys.stderr.write(second_output)
+        sys.stderr.write(f"\nNET app ACK failed: got {net_app_reply!r}\n")
         return 1
 
     print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "

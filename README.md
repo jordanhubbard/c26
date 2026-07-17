@@ -39,10 +39,12 @@ host operating system.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate.
-- A UI toolkit (`apps/lib/ui.*`) and the first real applications built on
-  it: `FILES` (browse, launch via the `spawn` syscall, delete, or open a
-  file in the editor — the filename travels over IPC) and `EDIT` (a
-  windowed text editor with arrows, Ctrl-S save, Ctrl-Q quit).
+- A UI toolkit (`apps/lib/ui.*`) and a real application suite built on it:
+  `FILES` (browse, launch via the `spawn` syscall, delete, or open a file
+  in the editor — the filename travels over IPC), `EDIT` (a windowed text
+  editor), `TRACKER` (an 8-voice step sequencer with saved patterns),
+  `BREAKOUT` (mouse paddle, mixer sound effects), and `NET` (a UDP mailbox
+  that ACKs every datagram reaching it from the host).
 - Power control from inside the machine: `BYE`/`EXIT`/`QUIT`/`SHUTDOWN`
   say goodbye and power off through QEMU virt's SiFive test finisher;
   `HALT` is the blunt debug variant — immediate exit, no ceremony.

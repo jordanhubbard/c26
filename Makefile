@@ -27,7 +27,7 @@ OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
 	-Wl,--no-relax
-CART_NAMES := paint crash spin ticker ping pong files edit
+CART_NAMES := paint crash spin ticker ping pong files edit tracker breakout net
 CART_LIB := $(wildcard apps/lib/*.c)
 CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
@@ -37,7 +37,7 @@ QEMU_DEVICES := -device virtio-gpu-device -device virtio-keyboard-device \
 	-device virtio-mouse-device -device virtio-sound-device \
 	-drive if=none,format=raw,file=$(DISK),id=c26disk \
 	-device virtio-blk-device,drive=c26disk \
-	-netdev user,id=net0,hostfwd=udp:127.0.0.1:12600-:2600 \
+	-netdev user,id=net0,hostfwd=udp:127.0.0.1:12600-:2600,hostfwd=udp:127.0.0.1:12601-:2601 \
 	-device virtio-net-device,netdev=net0
 
 .PHONY: all build carts disk run run-headless smoke test check compdb clean

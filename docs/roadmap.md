@@ -74,6 +74,14 @@ gate sends a real datagram from the host through QEMU user-net hostfwd into
 the guest stack and requires the echo — the old "TCP/IP loopback" label is
 retired for real networking.
 
+## Delivered: M6b — the application suite (2026-07-17)
+
+TRACKER (8-voice step sequencer with pattern save), BREAKOUT (mouse
+paddle, mixer blips, bricks), and NET (a UDP mailbox app that ACKs every
+datagram — the smoke gate reaches it from the host through its U-mode udp
+syscalls). apps/lib/rt.c supplies freestanding memset/memcpy for
+cartridges. The experiment scorecard lives in docs/experiment.md.
+
 ## Remaining course (in priority order)
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.
