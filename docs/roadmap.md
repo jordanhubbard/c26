@@ -92,34 +92,94 @@ WINDOW/FOCUS/SEND so the window manager and IPC are scriptable from the
 built-in language. C26FS filenames now allow '.'. The experiment's closing
 verdict is in docs/experiment.md. **The charted course is complete.**
 
-## Optional follow-ups (foundation is done)
+## Delivered follow-ups (foundation is done)
 
-- **Delivered 2026-07-17: BASIC string variables + EDIT.** A$..Z$ string
-  variables with assignment, concatenation (`+`), `PRINT`, `INPUT`, and
-  `IF A$ = "..."` / `<>` comparison, layered over the numeric evaluator
-  without disturbing it. `EDIT n` replays a stored line into the editor for
-  in-place editing. Gated in host tests and smoke.
-- **Delivered 2026-07-17: real-time clock.** The goldfish RTC (a real
-  QEMU virt device) gives the machine wall-clock time; BASIC `TIME`
-  returns Unix seconds and `TIME$` an `HH:MM:SS` string. Gated by a
-  sanity bound so the live value stays deterministic to check.
+- **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,
+  concatenation, `PRINT`, `INPUT`, and `IF A$ = "..."` / `<>` comparison.
+  `EDIT n` replays a stored line into the editor for in-place editing.
+- **Real-time clock (2026-07-17).** The goldfish RTC gives the machine
+  wall-clock time; BASIC `TIME` (Unix seconds) and `TIME$` (`HH:MM:SS`).
 
-Deliberately NOT shipped: TCP and DNS. They cannot be verified
-deterministically without external network access, and an ungated network
-claim would violate this project's rule that every capability is
-machine-checked. They remain honest future work, not silent stubs.
+---
 
-- **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
-  text editor become windowed apps.
-- **M6 — App suite + networking.** virtio-net with a minimal honest IP
-  stack, then editor, paint, tracker, network client, robot panel, a game.
-- **M7 — Self-hosting + scriptable desktop.** On-machine editor and
-  assembler/tiny-C producing runnable cartridges; BASIC bindings into the
-  toolkit; the experiment writeup (LOC budget vs capability).
-- **Continuous.** Host-side unit tests for basic.c/fs.c logic; BASIC strings
-  and a full-screen editor.
+# Backlog (2026-07-17 stopping point)
+
+The charted course (M1–M7) is complete: a memory-protected, preemptively
+multitasking, windowed, networked, self-hosting home computer in ~8,800
+readable lines that boots to READY in under a second. What follows is
+prioritized future work, none of it on a critical path. Every item must
+preserve the invariant that one person can read the whole machine and that
+`make check` gates every capability headlessly.
+
+## 1. Networking — the open design decision (highest value, needs a choice)
+
+The pivotal question is *where* reuse lives, not whether. The kernel stays
+legible; heavy reused code belongs at the cartridge/library layer behind the
+frozen ABI. Two legitimate directions (see the 2026-07-17 discussion):
+
+- **1a. Bespoke minimal kernel TCP** (recommended). A single-connection,
+  client-first TCP over the existing IP layer (~1–1.5K readable lines, no
+  fragmentation), plus a small DNS resolver over UDP (QEMU user-net DNS is
+  10.0.2.3). Writing the small legible thing *is* the experiment. Gate it
+  deterministically with QEMU `guestfwd` + a scripted host TCP peer — this
+  is what makes TCP shippable under the honesty rule, and it's a real
+  milestone, not a bolt-on.
+- **1b. A BASIC network surface + a `FETCH`/HTTP-get app** once TCP exists,
+  closing "every capability reachable from the built-in language" for the
+  network.
+- **1c. (Alternative thesis) Port uIP or lwIP as a cartridge library** to
+  demonstrate reuse at the app layer without touching the legible kernel —
+  historical precedent: uIP/Contiki ran on a real C64 over an Ethernet
+  cartridge.
+
+Reference: uIP (~few thousand lines) fits the kernel philosophy; lwIP (tens
+of thousands) belongs only as a cartridge library.
+
+## 2. BASIC language depth
+
+- String functions: `LEN`, `LEFT$`/`RIGHT$`/`MID$`, `CHR$`, `ASC`, `VAL`,
+  `STR$`.
+- Arrays (`DIM A(n)`), and user-defined `FN`.
+- `DATA`/`READ`/`RESTORE`.
+
+## 3. Window system + desktop
+
+- Window **resize** and a close/minimize affordance (only move exists today).
+- A graphical launcher/dock on the desktop layer (apps currently start via
+  `RUN NAME`).
+- Clipboard copy/paste between apps over IPC.
+- Double-buffered present to remove any residual tearing.
+
+## 4. Dev tools
+
+- Richer assembler: macros, `.INCLUDE`, expression operands, a data section.
+- A monitor/disassembler app (inspect memory and cartridges live).
+- Stretch: a tiny-C subset compiler producing cartridges (large; the real
+  self-hosting endgame).
+
+## 5. Apps (each a separately loaded toolkit cartridge)
+
+- Calculator, clock/watch (now that the RTC exists), hex editor, a small
+  spreadsheet, one more game.
+- Robot control panel driving the existing I2C/CAN SDK.
+
+## 6. Infrastructure / honesty
+
+- CI: run `make check` in GitHub Actions on push.
+- Speed up the smoke gate (currently ~3 min; parallelize the two boots).
+- Consider C26FS subdirectories, or deliberately keep the filesystem flat.
+
+## Deliberately not shipped (yet)
+
+TCP and DNS were declined rather than stubbed: they cannot be verified
+deterministically without the `guestfwd` + host-peer harness described in
+1a, and an ungated network claim would violate the machine-checked rule.
+They are honest future work.
+
+---
 
 Principles that bound all of it: freestanding C and assembly only in the
 target; a hobbyist can read the whole system; a capability is called
-hardware-backed only when QEMU emulates the device; `make smoke` stays the
-single gate.
+hardware-backed only when QEMU emulates the device; `make check` stays the
+single gate; and the moment an addition would need Linux (or code no one can
+read) is the moment it belongs at the cartridge layer, not in the kernel.
