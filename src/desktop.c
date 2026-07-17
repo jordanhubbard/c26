@@ -3,6 +3,7 @@
 #include "c26_fs.h"
 #include "c26_graphics.h"
 #include "c26_input.h"
+#include "c26_net.h"
 
 #define KEY_ESC 1U
 #define KEY_BACKSPACE 14U
@@ -353,6 +354,7 @@ void c26_io_pump(void)
         handle_input_event(event);
     }
     c26_audio_poll();
+    c26_net_poll();
 }
 
 void c26_desktop_poll(void)

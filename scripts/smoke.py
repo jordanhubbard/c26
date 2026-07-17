@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
+import socket
 import subprocess
 import sys
 import re
@@ -11,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ELF = ROOT / "build" / "c26.elf"
 DISK = ROOT / "build" / "c26-smoke.img"
+UDP_PORT = 12000 + (os.getpid() % 3000)
+udp_echo_reply = b""
 
 FIRST_BOOT_MARKERS = [
     "C26 RISC-V HOME COMPUTER",
@@ -20,6 +24,8 @@ FIRST_BOOT_MARKERS = [
     "C26FS: mounted 0 file(s)",
     "FRAMEBUFFER: virtio-gpu scanout 640x480x32",
     "VIRTIO INPUT: 2 device(s) online",
+    "VIRTIO NET: online 10.0.2.15",
+    "UDP ECHO SERVICE: port 2600",
     "C26 DESKTOP: graphical shell online",
     "OPENGL-STYLE SDK: z-buffered triangle rasterizer online",
     "RAY TRACER: two shaded spheres rendered",
@@ -154,39 +160,6 @@ delete temp2
 dir
 """
 
-# Ctrl-C is a real-time signal, not a queued character: it kills whichever
-# cartridge is running when it arrives. The second boot therefore feeds its
-# input in stages, sending \x03 only once SPIN is definitely running.
-SECOND_BOOT_STAGES = [
-    (
-        'load boot\n'
-        'list\n'
-        'run\n'
-        'load demo\n'
-        'run\n'
-        'dir\n'
-        'run "paint"\n'
-        'q\n'
-        'run "crash"\n'
-        'print 111+222\n'
-        'run "spin"\n',
-        30.0,
-    ),
-    ('\x03print 999-111\n', 8.0),
-    ('run "ticker"\n', 3.0),
-    ('\x14jobs\nprint 41000+1\n', 4.0),
-    ('kill 0\nprint 51000+1\n', 4.0),
-    ('print fb\nrun "pong"\n', 3.0),
-    ('\x14print fb\nrun "ping"\n', 4.0),
-    ('\x14kill 0\nprint 71000+1\n', 4.0),
-    ('run "edit"\n', 3.0),
-    ('SMOKE NOTE\x13', 2.0),   # type into EDIT, Ctrl-S saves
-    ('\x11', 2.0),             # Ctrl-Q quits the editor
-    ('dir\nrun "files"\n', 3.0),
-    ('r', 2.0),                # R on the first entry (DEMO): spawn error path
-    ('q', 2.0),                # quit FILES
-    ('print 92000+2\nbye\n', 4.0),  # the machine powers itself off
-]
 
 
 def run(
@@ -242,6 +215,10 @@ def qemu_command() -> list[str]:
         f"if=none,format=raw,file={DISK},id=c26disk",
         "-device",
         "virtio-blk-device,drive=c26disk",
+        "-netdev",
+        f"user,id=net0,hostfwd=udp:127.0.0.1:{UDP_PORT}-:2600",
+        "-device",
+        "virtio-net-device,netdev=net0",
     ]
 
 
@@ -255,7 +232,58 @@ def boot(input_text: str, timeout: float) -> str:
         return stdout + stderr
 
 
-def boot_staged(stages: list[tuple[str, float]]) -> str:
+def udp_echo_probe() -> None:
+    """Send a datagram through hostfwd to the guest's echo service."""
+    global udp_echo_reply
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    probe.settimeout(2.0)
+    for _ in range(4):
+        try:
+            probe.sendto(b"C26-NET-PING", ("127.0.0.1", UDP_PORT))
+            udp_echo_reply, _ = probe.recvfrom(64)
+            break
+        except OSError:
+            continue
+    probe.close()
+
+
+# Ctrl-C is a real-time signal, not a queued character: it kills whichever
+# cartridge is running when it arrives. The second boot therefore feeds its
+# input in stages, sending \x03 only once SPIN is definitely running.
+SECOND_BOOT_STAGES = [
+    (
+        'load boot\n'
+        'list\n'
+        'run\n'
+        'load demo\n'
+        'run\n'
+        'dir\n'
+        'run "paint"\n'
+        'q\n'
+        'run "crash"\n'
+        'print 111+222\n'
+        'run "spin"\n',
+        30.0,
+    ),
+    ('\x03print 999-111\n', 8.0),
+    ('run "ticker"\n', 3.0),
+    ('\x14jobs\nprint 41000+1\n', 4.0),
+    ('kill 0\nprint 51000+1\n', 4.0),
+    ('print fb\nrun "pong"\n', 3.0),
+    ('\x14print fb\nrun "ping"\n', 4.0),
+    ('\x14kill 0\nprint 71000+1\n', 4.0),
+    (udp_echo_probe, 1.0),
+    ('run "edit"\n', 3.0),
+    ('SMOKE NOTE\x13', 2.0),   # type into EDIT, Ctrl-S saves
+    ('\x11', 2.0),             # Ctrl-Q quits the editor
+    ('dir\nrun "files"\n', 3.0),
+    ('r', 2.0),                # R on the first entry (DEMO): spawn error path
+    ('q', 2.0),                # quit FILES
+    ('print 92000+2\nbye\n', 4.0),  # the machine powers itself off
+]
+
+
+def boot_staged(stages) -> str:
     process = subprocess.Popen(
         qemu_command(),
         cwd=str(ROOT),
@@ -265,9 +293,12 @@ def boot_staged(stages: list[tuple[str, float]]) -> str:
         stderr=subprocess.STDOUT,
     )
     try:
-        for text, delay in stages:
-            process.stdin.write(text)
-            process.stdin.flush()
+        for action, delay in stages:
+            if callable(action):
+                action()
+            else:
+                process.stdin.write(action)
+                process.stdin.flush()
             time.sleep(delay)
     except BrokenPipeError:
         pass
@@ -354,12 +385,18 @@ def main() -> int:
         sys.stderr.write("\nframebuffer unchanged by a window — "
                          "compositor did not draw it\n")
         return 1
+    # Networking proof: a real UDP datagram went from the host through
+    # QEMU's user network into the guest stack and came back.
+    if udp_echo_reply != b"C26-NET-PING":
+        sys.stderr.write(second_output)
+        sys.stderr.write(f"\nUDP echo failed: got {udp_echo_reply!r}\n")
+        return 1
 
     print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "
           "persistence, multiprocessing U-mode cartridges (clean run, "
           "contained fault, preemptive kill, concurrent background job), "
-          "windows + IPC, the FILES/EDIT toolkit apps with spawn, and a "
-          "guest-initiated power-off")
+          "windows + IPC, the FILES/EDIT toolkit apps with spawn, a real "
+          "UDP round trip over virtio-net, and a guest-initiated power-off")
     return 0
 
 

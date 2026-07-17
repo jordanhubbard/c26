@@ -32,6 +32,7 @@ replacing magic memory addresses with typed SDK calls.
 | Windows | Movable z-ordered windows over the console root; click/drag/Tab focus |
 | IPC | Bounded per-process mailboxes; send/recv syscalls |
 | Applications | c26_ui toolkit; FILES browser/launcher (spawn), EDIT text editor |
+| Networking | virtio-net + ARP/ICMP/UDP; kernel echo :2600; app udp syscalls |
 | Power | BYE/HALT power off via the SiFive test finisher |
 | Display | 640x480x32 software surface on a virtio-GPU scanout |
 | Console | 100x45 scrolling text console, printable-ASCII 5x7 font |

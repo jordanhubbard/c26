@@ -21,7 +21,7 @@ LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,src/linker.ld \
 HOSTCC ?= cc
 HOSTCFLAGS := -O1 -g -Wall -Wextra -Iinclude -Itests
 
-SRCS := src/boot.S src/trap.S src/user_stubs.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/input.c src/devices.c src/graphics.c \
+SRCS := src/boot.S src/trap.S src/user_stubs.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/net.c src/input.c src/devices.c src/graphics.c \
 	src/audio.c src/basic.c src/cart.c src/vm.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
@@ -36,7 +36,9 @@ QEMU_BOOT := -bios none -no-reboot -kernel $(ELF)
 QEMU_DEVICES := -device virtio-gpu-device -device virtio-keyboard-device \
 	-device virtio-mouse-device -device virtio-sound-device \
 	-drive if=none,format=raw,file=$(DISK),id=c26disk \
-	-device virtio-blk-device,drive=c26disk
+	-device virtio-blk-device,drive=c26disk \
+	-netdev user,id=net0,hostfwd=udp:127.0.0.1:12600-:2600 \
+	-device virtio-net-device,netdev=net0
 
 .PHONY: all build carts disk run run-headless smoke test check compdb clean
 

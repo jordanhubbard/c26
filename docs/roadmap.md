@@ -64,6 +64,16 @@ machine off through the SiFive test finisher; HALT is the immediate debug
 variant. The smoke gate types into EDIT, saves, lists the file, exercises
 FILES' spawn error path, and ends with a guest-initiated power-off.
 
+## Delivered: M6a — honest networking (2026-07-17)
+
+src/net.c: a virtio-net driver plus a deliberately small IPv4 stack — ARP
+(request, reply, and learning the gateway MAC from forwarded traffic), ICMP
+echo reply, and UDP with bounded port bindings. The kernel answers UDP echo
+on port 2600; cartridges get udp_bind/udp_send/udp_recv syscalls. The smoke
+gate sends a real datagram from the host through QEMU user-net hostfwd into
+the guest stack and requires the echo — the old "TCP/IP loopback" label is
+retired for real networking.
+
 ## Remaining course (in priority order)
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.

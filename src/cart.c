@@ -5,6 +5,7 @@
 #include "c26_devices.h"
 #include "c26_fs.h"
 #include "c26_graphics.h"
+#include "c26_net.h"
 #include "c26_user.h"
 
 /* The process host and window manager. Up to C26_NPROC cartridges run
@@ -560,6 +561,33 @@ static long do_syscall(c26_user_frame_t *frame)
         const char *name = user_string(a0);
         if (name == 0) break;
         return c26_cart_run(name);
+    }
+    case C26_SYS_UDP_BIND:
+        return c26_udp_bind((uint16_t)a0);
+    case C26_SYS_UDP_SEND: {
+        uintptr_t data = user_ptr(a3, a4 == 0 ? 1 : a4, 0);
+        if (data == 0) break;
+        return c26_udp_send((uint32_t)a0, (uint16_t)a1, (uint16_t)a2,
+                            (const void *)data, a4);
+    }
+    case C26_SYS_UDP_RECV: {
+        uintptr_t data = user_ptr(a3, a4 == 0 ? 1 : a4, 1);
+        if (data == 0) break;
+        uint32_t from_ip = 0;
+        uint16_t from_port = 0;
+        int received = c26_udp_recv((uint16_t)a0, &from_ip, &from_port,
+                                    (void *)data, a4);
+        if (a1 != 0) {
+            uintptr_t out = user_ptr(a1, 4, 1);
+            if (out == 0) break;
+            *(uint32_t *)out = from_ip;
+        }
+        if (a2 != 0) {
+            uintptr_t out = user_ptr(a2, 2, 1);
+            if (out == 0) break;
+            *(uint16_t *)out = from_port;
+        }
+        return received;
     }
     case C26_SYS_RECV: {
         if (process->mail_tail == process->mail_head) {

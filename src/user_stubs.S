@@ -52,6 +52,9 @@ STUB(stub_window_size, C26_SYS_WINDOW_SIZE)
 STUB(stub_send, C26_SYS_SEND)
 STUB(stub_recv, C26_SYS_RECV)
 STUB(stub_spawn, C26_SYS_SPAWN)
+STUB(stub_udp_bind, C26_SYS_UDP_BIND)
+STUB(stub_udp_send, C26_SYS_UDP_SEND)
+STUB(stub_udp_recv, C26_SYS_UDP_RECV)
 
     /* c26_api_t, field for field. */
     .align 3
@@ -87,3 +90,6 @@ c26_user_api:
     .quad stub_send
     .quad stub_recv
     .quad stub_spawn
+    .quad stub_udp_bind
+    .quad stub_udp_send
+    .quad stub_udp_recv

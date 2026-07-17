@@ -125,11 +125,14 @@ custom QEMU invocations must also pass:
 
 ## Backend boundaries
 
-Block storage, GPU, keyboard, mouse, and PCM audio have real QEMU
-emulated-device backends.
-The I2C, CAN, and packet SDKs are deterministic in-kernel fabrics intended for
-safe demos; they do not claim to communicate with physical buses or an external
-network. The 3D and ray-tracing paths run on the RISC-V CPU, which keeps their
+Block storage, GPU, keyboard, mouse, PCM audio, and **networking** have real
+QEMU emulated-device backends. The network stack is a small honest IPv4
+implementation over virtio-net — ARP, ICMP echo reply, and UDP — on QEMU's
+user network (guest 10.0.2.15, gateway 10.0.2.2). A kernel UDP echo service
+on port 2600 is reachable from the host through `hostfwd`, and cartridges
+get `udp_bind`/`udp_send`/`udp_recv` syscalls. The I2C and CAN SDKs remain
+deterministic in-kernel fabrics for safe demos; they do not claim physical
+buses. The 3D and ray-tracing paths run on the RISC-V CPU, which keeps their
 behavior available without a host graphics API.
 
 ## Course

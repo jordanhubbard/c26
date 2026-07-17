@@ -36,7 +36,10 @@
 #define C26_SYS_SEND 26
 #define C26_SYS_RECV 27
 #define C26_SYS_SPAWN 28
-#define C26_SYS_COUNT 29
+#define C26_SYS_UDP_BIND 29
+#define C26_SYS_UDP_SEND 30
+#define C26_SYS_UDP_RECV 31
+#define C26_SYS_COUNT 32
 
 /* Trap frame layout: mepc at 0, x1..x31 at 8*N, kernel trap sp at 256,
  * kernel callee-saved context (ra, sp, s0-s11) at 264. trap.S depends on

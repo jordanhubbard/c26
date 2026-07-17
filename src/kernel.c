@@ -2,6 +2,7 @@
 #include "c26_block.h"
 #include "c26_console.h"
 #include "c26_fs.h"
+#include "c26_net.h"
 
 void kmain(void)
 {
@@ -11,6 +12,7 @@ void kmain(void)
     c26_interrupts_init();
     c26_block_init();
     c26_fs_init();
+    c26_net_init();
     c26_desktop_init();
     c26_graphics_demo();
     c26_audio_demo();

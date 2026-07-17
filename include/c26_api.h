@@ -90,6 +90,15 @@ typedef struct {
     /* Launch another cartridge from C26FS; returns its job number or -1.
        The new job takes focus. */
     int (*spawn)(const char *name);
+
+    /* UDP over the real virtio-net device (QEMU user network: this
+       machine is 10.0.2.15, the gateway 10.0.2.2). All nonblocking;
+       udp_recv returns the byte count or -1 when nothing is queued. */
+    int (*udp_bind)(uint16_t port);
+    int (*udp_send)(uint32_t ip, uint16_t dst_port, uint16_t src_port,
+                    const void *data, size_t size);
+    int (*udp_recv)(uint16_t port, uint32_t *from_ip, uint16_t *from_port,
+                    void *data, size_t capacity);
 } c26_api_t;
 
 /* Arrow keys are delivered through getchar() as these codes. */
