@@ -26,6 +26,13 @@ host operating system.
   pointer faults and kills the app, not the machine; the timer preempts, so
   input and audio stay alive under a spinning app and Ctrl-C kills it
   (`apps/crash` and `apps/spin` prove both in the smoke gate).
+- Multiprocessing: up to four cartridges run concurrently in round-robin
+  time slices, each drawing to its own 640x480 surface; the compositor
+  shows the focused one with a status bar. All cartridges link at the same
+  address — per-process page tables map it to different physical slots.
+  Tab / Ctrl-T switch focus without stopping anything; `JOBS` lists and
+  `KILL n` terminates; `apps/ticker` prints a heartbeat that interleaves
+  with console work as the smoke gate's concurrency proof.
 - 640x480 32-bit virtio-GPU scanout with software-buffer fallback, rendering
   a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with

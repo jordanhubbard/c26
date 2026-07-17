@@ -27,7 +27,7 @@ OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
 	-Wl,--no-relax
-CART_NAMES := paint crash spin
+CART_NAMES := paint crash spin ticker
 CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
 QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M
@@ -91,7 +91,7 @@ $(BUILD)/%.cart: $(BUILD)/%.elf
 
 $(DISK): scripts/mkdisk.py scripts/fsinstall.py $(CARTS) | $(BUILD)
 	python3 scripts/mkdisk.py $@
-	python3 scripts/fsinstall.py $@ PAINT=$(BUILD)/paint.cart
+	python3 scripts/fsinstall.py $@ $(foreach c,$(CART_NAMES),$(shell echo $(c) | tr a-z A-Z)=$(BUILD)/$(c).cart)
 
 run: $(ELF) $(DISK)
 	$(QEMU) $(QEMU_MACHINE) -display default -serial stdio -monitor none \

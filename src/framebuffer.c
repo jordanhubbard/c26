@@ -258,7 +258,14 @@ void c26_draw_line(int x0, int y0, int x1, int y1, uint32_t color)
     }
 }
 
+const uint8_t *c26_font_glyph(char ch);
+
 static const uint8_t *glyph_for(char ch)
+{
+    return c26_font_glyph(ch);
+}
+
+const uint8_t *c26_font_glyph(char ch)
 {
     static const uint8_t unknown[5] = {0x7f, 0x41, 0x5d, 0x41, 0x7f};
     /* Column-major 5x7 glyphs, bit 0 = top row, for ASCII 32..126. */

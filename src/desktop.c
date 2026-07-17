@@ -6,6 +6,7 @@
 
 #define KEY_ESC 1U
 #define KEY_BACKSPACE 14U
+#define KEY_TAB 15U
 #define KEY_ENTER 28U
 #define KEY_LEFTSHIFT 42U
 #define KEY_RIGHTSHIFT 54U
@@ -213,6 +214,10 @@ static void cart_event(c26_input_event_t event)
         event.code == BTN_LEFT) {
         return;
     }
+    if (event.code == KEY_TAB) {
+        c26_cart_focus_next();
+        return;
+    }
     if (event.code == KEY_ESC) {
         c26_basic_feed_char(0x1b);
         return;
@@ -313,12 +318,17 @@ void c26_desktop_poll(void)
         redraw_requested = 0;
         render_desktop();
     }
-    /* Presenting the console is a full-screen GPU transfer; cap it at
-       one render per 5 timer ticks so typing bursts stay responsive. */
+    /* Presenting is a full-screen GPU transfer; cap it at one render per
+       5 timer ticks so typing bursts and app frames stay responsive. */
     uint64_t now = c26_interrupt_ticks();
-    if (c26_console_dirty() && now - last_flush_tick >= 5) {
-        last_flush_tick = now;
-        c26_console_flush();
+    if (now - last_flush_tick >= 5) {
+        if (c26_screen_mode() == C26_SCREEN_CART) {
+            last_flush_tick = now;
+            c26_compositor_flush();
+        } else if (c26_console_dirty()) {
+            last_flush_tick = now;
+            c26_console_flush();
+        }
     }
 }
 

@@ -115,8 +115,28 @@ spinning app cannot starve the machine, and Ctrl-C terminates it
 preemptively. A fault (wild pointer, illegal instruction) prints the cause
 and kills the process; the console returns and the machine keeps working.
 `apps/crash` and `apps/spin` exist to prove both properties in the smoke
-gate. One process runs at a time; a scheduler and IPC arrive with the
-compositor, when multiple apps first exist to schedule.
+gate.
+
+## Processes and the compositor
+
+Up to four cartridges run concurrently. Every cartridge links at
+`C26_CART_BASE`; each process's page tables map that VA to a different
+physical slot, so the classic single-load-address limitation disappears
+under Sv39. The kernel main loop hands out round-robin time slices
+(`c26_cart_schedule`); the timer trap ends a slice by unwinding to the
+scheduler, and `yield` gives one up voluntarily. The kernel's context lives
+in globals rather than any process frame, so any process's fault, exit, or
+kill unwinds cleanly no matter which one was running.
+
+Each process owns a private 640x480 surface; drawing syscalls render there,
+and `present` marks damage. The compositor blits the focused surface to the
+scanout with a status bar naming the job. Focus routes input: the focused
+process sees `getchar` and mouse buttons, Tab (keyboard) or Ctrl-T (serial)
+cycle focus back to the BASIC console while every job keeps running, and
+Ctrl-C kills the focused job. `JOBS` lists them, `KILL n` stops one.
+`apps/ticker` makes the concurrency visible: its heartbeat interleaves with
+console output in the smoke gate. Message-passing IPC and movable window
+geometry are the next layer.
 
 BASIC stores up to 256 sorted numbered lines of 80 characters. `SAVE`
 serializes those lines into a C26FS file, while `LOAD` validates and rebuilds

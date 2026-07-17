@@ -55,9 +55,10 @@ FIRST_BOOT_MARKERS = [
 ]
 
 SECOND_BOOT_MARKERS = [
-    # DEMO + BOOT written by the guest, PAINT/CRASH/SPIN installed host-side
-    # between boots — fsinstall.py modifying a guest-formatted filesystem.
-    "C26FS: mounted 5 file(s)",
+    # DEMO + BOOT written by the guest, PAINT/CRASH/SPIN/TICKER installed
+    # host-side between boots — fsinstall.py modifying a guest-formatted
+    # filesystem.
+    "C26FS: mounted 6 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -79,6 +80,12 @@ SECOND_BOOT_MARKERS = [
     "CART KILLED",
     "CART EXIT -3",
     "888",
+    # Multiprocessing: TICKER keeps running while the console answers.
+    "TICKER CART ONLINE",
+    "TICK",
+    "JOB 0  TICKER",
+    "41001",
+    "51001",
 ]
 
 FIRST_BOOT_INPUT = """\
@@ -149,7 +156,10 @@ SECOND_BOOT_STAGES = [
         'run "spin"\n',
         30.0,
     ),
-    ('\x03print 999-111\n', 10.0),
+    ('\x03print 999-111\n', 8.0),
+    ('run "ticker"\n', 3.0),
+    ('\x14jobs\nprint 41000+1\n', 4.0),
+    ('kill 0\nprint 51000+1\n', 4.0),
 ]
 
 
@@ -291,7 +301,7 @@ def main() -> int:
 
     install = run(["python3", "scripts/fsinstall.py", str(DISK),
                    "PAINT=build/paint.cart", "CRASH=build/crash.cart",
-                   "SPIN=build/spin.cart"])
+                   "SPIN=build/spin.cart", "TICKER=build/ticker.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
@@ -301,10 +311,18 @@ def main() -> int:
     second_output = boot_staged(SECOND_BOOT_STAGES)
     if not require_markers(second_output, SECOND_BOOT_MARKERS, "second-boot"):
         return 1
+    # Concurrency proof: TICKER must still be printing after the console
+    # answered 41001 — background output interleaved with foreground work.
+    if second_output.rindex("TICK") <= second_output.index("41001"):
+        sys.stderr.write(second_output)
+        sys.stderr.write("\nno TICK after console interaction — "
+                         "background job did not run concurrently\n")
+        return 1
 
     print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "
-          "persistence, and U-mode cartridges — clean run, contained kernel-"
-          "memory fault, and preemptive kill of a hung app")
+          "persistence, and multiprocessing U-mode cartridges — clean run, "
+          "contained fault, preemptive kill, and a background job running "
+          "concurrently with the console")
     return 0
 
 

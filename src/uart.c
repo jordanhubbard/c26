@@ -25,14 +25,14 @@ void c26_uart_putc(char ch)
 
 int c26_uart_getc_nonblocking(void)
 {
+    /* The interrupt handler is the only RBR reader; consuming here raced
+       it and duplicated bytes. Draining the ring re-enables RX interrupts
+       in case the handler masked them under backpressure. */
+    c26_uart_enable_interrupt();
     if (receive_tail != receive_head) {
         uint8_t value = receive_buffer[receive_tail & 0xffU];
         receive_tail++;
-        c26_uart_enable_interrupt();
         return value;
-    }
-    if ((uart0[UART_LSR] & UART_LSR_DR) != 0) {
-        return uart0[UART_RBR];
     }
     return -1;
 }

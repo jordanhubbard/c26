@@ -24,6 +24,8 @@ void c26_draw_pixel(int x, int y, uint32_t color);
 void c26_fill_rect(int x, int y, int width, int height, uint32_t color);
 void c26_draw_rect(int x, int y, int width, int height, uint32_t color);
 void c26_draw_line(int x0, int y0, int x1, int y1, uint32_t color);
+/* 5-column glyph bitmap for any printable ASCII char, bit 0 = top row. */
+const uint8_t *c26_font_glyph(char ch);
 void c26_draw_char(int x, int y, char ch, uint32_t foreground,
                    uint32_t background, unsigned int scale);
 void c26_draw_text(int x, int y, const char *text, uint32_t foreground,

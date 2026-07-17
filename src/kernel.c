@@ -31,6 +31,10 @@ void kmain(void)
 
     for (;;) {
         c26_desktop_poll();
-        c26_idle();
+        if (c26_cart_any_runnable()) {
+            c26_cart_schedule();
+        } else {
+            c26_idle();
+        }
     }
 }

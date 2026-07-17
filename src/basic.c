@@ -1164,8 +1164,11 @@ static void run_program(void)
     }
     running = 0;
     c26_puts("READY\n");
+    /* Replay type-ahead — but stop the moment a replayed line hands the
+       queue to a new consumer (RUN restarts, RUN "CART" spawns), or the
+       feed would push each popped char straight back forever. */
     char ch;
-    while (!running && queue_pop(&ch)) {
+    while (!running && !external_consumer && queue_pop(&ch)) {
         c26_basic_feed_char(ch);
     }
 }
@@ -1357,6 +1360,19 @@ static void process_line(const char *line)
         list_files();
         return;
     }
+    if (keyword(line, "JOBS")) {
+        c26_puts("JOBS:\n");
+        c26_cart_list_jobs();
+        return;
+    }
+    if (keyword(line, "KILL")) {
+        const char *cursor = line + 4;
+        uint64_t job = c26_parse_uint(&cursor);
+        if (!c26_cart_kill((int)job)) {
+            c26_puts("Error: no such job\n");
+        }
+        return;
+    }
     if (keyword(line, "DELETE")) {
         char name[C26_FS_NAME_MAX + 1];
         if (!parse_filename(line, 6, name)) {
@@ -1399,7 +1415,7 @@ static void process_line(const char *line)
     if (keyword(line, "HELP")) {
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
-        c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" HELP\n");
+        c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" JOBS KILL HELP\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB\n");
         return;
     }
@@ -1461,6 +1477,11 @@ int c26_basic_running(void)
     return running;
 }
 
+int c26_basic_queue_consumed_externally(void)
+{
+    return external_consumer;
+}
+
 int c26_basic_can_accept(void)
 {
     return !(running || external_consumer) ||
@@ -1491,6 +1512,10 @@ void c26_basic_feed_char(char ch)
 {
     if (ch == '\r') {
         ch = '\n';
+    }
+    if (ch == 0x14) { /* Ctrl-T: focus the console, apps keep running */
+        c26_cart_focus_console();
+        return;
     }
     if (running || external_consumer) {
         /* Ctrl-C always breaks; Esc breaks BASIC but is delivered to a

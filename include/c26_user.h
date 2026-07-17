@@ -55,21 +55,44 @@ typedef struct {
 /* Register accessor: xN for N in 1..31. */
 #define C26_FRAME_X(frame, n) ((frame)->regs[(n)-1])
 
-extern c26_user_frame_t c26_user_frame;
+/* trap.S resumes the frame this points at; the scheduler retargets it on
+ * every process switch. The kernel's own context lives in the globals, not
+ * in any frame, so any process's exit unwinds to the scheduler. */
+extern c26_user_frame_t *c26_current_frame;
+extern uint64_t c26_kernel_trap_sp;
+extern uint64_t c26_kernel_context[14];
 
-/* Enters U-mode per the frame; returns only via c26_user_terminate with
- * that call's exit code. */
+/* Enters U-mode per the current frame; returns only via
+ * c26_user_terminate with that call's code. */
 long c26_user_enter(c26_user_frame_t *frame);
-void c26_user_terminate(c26_user_frame_t *frame, long code)
-    __attribute__((noreturn));
+void c26_user_terminate(long code) __attribute__((noreturn));
 
-/* Sv39 user address space: identity-maps the given user-visible ranges and
- * loads satp. The kernel itself stays bare (M-mode ignores satp). */
-void c26_vm_reset(void);
-int c26_vm_map_user(uint64_t base, uint64_t size, int writable,
-                    int executable);
-void c26_vm_activate(void);
-int c26_vm_user_range(uint64_t base, uint64_t size, int write);
+/* Sv39 user address spaces. Each process owns one; the kernel itself stays
+ * bare (M-mode ignores satp). */
+#define C26_VM_POOL_PAGES 12U
+#define C26_VM_REGION_MAX 8U
+
+typedef struct {
+    uint64_t va;
+    uint64_t pa;
+    uint64_t size;
+    int writable;
+} c26_vm_region_t;
+
+typedef struct {
+    uint64_t root[512] __attribute__((aligned(4096)));
+    uint64_t pool[C26_VM_POOL_PAGES][512] __attribute__((aligned(4096)));
+    c26_vm_region_t regions[C26_VM_REGION_MAX];
+    unsigned int tables_used;
+    unsigned int region_count;
+} c26_vm_space_t;
+
+void c26_vm_init(c26_vm_space_t *space);
+int c26_vm_map(c26_vm_space_t *space, uint64_t va, uint64_t pa, uint64_t size,
+               int writable, int executable);
+void c26_vm_activate(c26_vm_space_t *space);
+uintptr_t c26_vm_translate(const c26_vm_space_t *space, uint64_t va,
+                           uint64_t size, int write);
 
 void c26_trap_handler_user(c26_user_frame_t *frame);
 

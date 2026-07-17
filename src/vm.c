@@ -9,45 +9,32 @@
 #define PTE_A (1UL << 6)
 #define PTE_D (1UL << 7)
 #define PAGE_SIZE 4096UL
-#define TABLE_POOL_PAGES 16U
-#define USER_REGION_MAX 8U
 
-typedef struct {
-    uint64_t base;
-    uint64_t size;
-    int writable;
-} vm_region_t;
-
-static uint64_t root_table[512] __attribute__((aligned(4096)));
-static uint64_t table_pool[TABLE_POOL_PAGES][512] __attribute__((aligned(4096)));
-static unsigned int tables_used;
-static vm_region_t regions[USER_REGION_MAX];
-static unsigned int region_count;
-
-static uint64_t *alloc_table(void)
+static uint64_t *alloc_table(c26_vm_space_t *space)
 {
-    if (tables_used == TABLE_POOL_PAGES) {
+    if (space->tables_used == C26_VM_POOL_PAGES) {
         return 0;
     }
-    uint64_t *table = table_pool[tables_used++];
+    uint64_t *table = space->pool[space->tables_used++];
     memset(table, 0, PAGE_SIZE);
     return table;
 }
 
-void c26_vm_reset(void)
+void c26_vm_init(c26_vm_space_t *space)
 {
-    memset(root_table, 0, sizeof(root_table));
-    tables_used = 0;
-    region_count = 0;
+    memset(space->root, 0, sizeof(space->root));
+    space->tables_used = 0;
+    space->region_count = 0;
 }
 
-static int map_page(uint64_t va, uint64_t pa, uint64_t flags)
+static int map_page(c26_vm_space_t *space, uint64_t va, uint64_t pa,
+                    uint64_t flags)
 {
-    uint64_t *table = root_table;
+    uint64_t *table = space->root;
     for (int level = 2; level > 0; level--) {
         unsigned int index = (va >> (12 + 9 * level)) & 0x1ff;
         if ((table[index] & PTE_V) == 0) {
-            uint64_t *next = alloc_table();
+            uint64_t *next = alloc_table(space);
             if (next == 0) {
                 return 0;
             }
@@ -59,41 +46,54 @@ static int map_page(uint64_t va, uint64_t pa, uint64_t flags)
     return 1;
 }
 
-int c26_vm_map_user(uint64_t base, uint64_t size, int writable, int executable)
+int c26_vm_map(c26_vm_space_t *space, uint64_t va, uint64_t pa, uint64_t size,
+               int writable, int executable)
 {
-    if ((base & (PAGE_SIZE - 1)) != 0 || size == 0 ||
-        region_count == USER_REGION_MAX) {
+    if ((va & (PAGE_SIZE - 1)) != 0 || (pa & (PAGE_SIZE - 1)) != 0 ||
+        size == 0 || space->region_count == C26_VM_REGION_MAX) {
         return 0;
     }
     uint64_t flags = PTE_U | PTE_R;
     if (writable) flags |= PTE_W;
     if (executable) flags |= PTE_X;
-    uint64_t end = (base + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    for (uint64_t va = base; va < end; va += PAGE_SIZE) {
-        if (!map_page(va, va, flags)) {
+    uint64_t length = (size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    for (uint64_t offset = 0; offset < length; offset += PAGE_SIZE) {
+        if (!map_page(space, va + offset, pa + offset, flags)) {
             return 0;
         }
     }
-    regions[region_count++] = (vm_region_t){base, end - base, writable};
+    c26_vm_region_t *region = &space->regions[space->region_count++];
+    region->va = va;
+    region->pa = pa;
+    region->size = length;
+    region->writable = writable;
     return 1;
 }
 
-void c26_vm_activate(void)
+void c26_vm_activate(c26_vm_space_t *space)
 {
-    uint64_t satp = (8UL << 60) | ((uint64_t)(uintptr_t)root_table >> 12);
+    uint64_t satp = (8UL << 60) | ((uint64_t)(uintptr_t)space->root >> 12);
     __asm__ volatile("csrw satp, %0" ::"r"(satp));
     __asm__ volatile("sfence.vma zero, zero");
 }
 
-int c26_vm_user_range(uint64_t base, uint64_t size, int write)
+/* Translates a user range to a kernel-usable physical pointer, or 0 when
+ * any byte falls outside the process's mapped regions (or write access is
+ * requested on a read-only region). */
+uintptr_t c26_vm_translate(const c26_vm_space_t *space, uint64_t va,
+                           uint64_t size, int write)
 {
     if (size == 0) {
-        return 1;
+        size = 1;
     }
-    for (unsigned int i = 0; i < region_count; i++) {
-        if (base >= regions[i].base && size <= regions[i].size &&
-            base - regions[i].base <= regions[i].size - size) {
-            return !write || regions[i].writable;
+    for (unsigned int i = 0; i < space->region_count; i++) {
+        const c26_vm_region_t *region = &space->regions[i];
+        if (va >= region->va && size <= region->size &&
+            va - region->va <= region->size - size) {
+            if (write && !region->writable) {
+                return 0;
+            }
+            return (uintptr_t)(region->pa + (va - region->va));
         }
     }
     return 0;
