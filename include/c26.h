@@ -64,6 +64,7 @@ void c26_interrupts_init(void);
 uint64_t c26_interrupt_ticks(void);
 uint64_t c26_interrupt_external_count(void);
 void c26_idle(void);
+uint64_t c26_rtc_seconds(void);
 void c26_poweroff(void) __attribute__((noreturn));
 
 #endif

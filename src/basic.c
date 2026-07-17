@@ -247,6 +247,9 @@ static int64_t parse_factor(parser_t *p)
         }
         return value;
     }
+    if (match_word(p, "TIME")) {
+        return (int64_t)c26_rtc_seconds();
+    }
     if (match_word(p, "TI")) {
         return (int64_t)c26_interrupt_ticks();
     }
@@ -473,7 +476,26 @@ static exec_t exec_statement(const char *text, long pc);
 static int is_string_ref(const char *cursor)
 {
     cursor = c26_skip_spaces(cursor);
-    return *cursor == '"' || (is_upper(*cursor) && cursor[1] == '$');
+    if (*cursor == '"') return 1;
+    if (keyword(cursor, "TIME$")) return 1;
+    return is_upper(*cursor) && cursor[1] == '$';
+}
+
+static void format_time(char *out)
+{
+    uint64_t seconds = c26_rtc_seconds();
+    unsigned int s = (unsigned int)(seconds % 60);
+    unsigned int m = (unsigned int)((seconds / 60) % 60);
+    unsigned int h = (unsigned int)((seconds / 3600) % 24);
+    out[0] = (char)('0' + h / 10);
+    out[1] = (char)('0' + h % 10);
+    out[2] = ':';
+    out[3] = (char)('0' + m / 10);
+    out[4] = (char)('0' + m % 10);
+    out[5] = ':';
+    out[6] = (char)('0' + s / 10);
+    out[7] = (char)('0' + s % 10);
+    out[8] = '\0';
 }
 
 /* Evaluates a string expression (literals and A$ joined by '+') into out. */
@@ -493,6 +515,13 @@ static int eval_string(parser_t *p, char *out, size_t cap)
                 return 0;
             }
             p->cursor = cursor + 1;
+        } else if (keyword(cursor, "TIME$")) {
+            char clock[16];
+            format_time(clock);
+            for (const char *c = clock; *c != '\0'; c++) {
+                if (length + 1 < cap) out[length++] = *c;
+            }
+            p->cursor = cursor + 5;
         } else if (is_upper(*cursor) && cursor[1] == '$') {
             const char *value = strvars[*cursor - 'A'];
             while (*value != '\0') {
@@ -1622,7 +1651,7 @@ static void process_line(const char *line)
         c26_puts("DESKTOP: WINDOW J,X,Y  FOCUS J  SEND J,\"MSG\"\n");
         c26_puts("LIST EDIT RUN NEW DIR SAVE LOAD DELETE RENAME RUN NAME JOBS KILL BYE HELP\n");
         c26_puts("STRINGS: A$=\"TEXT\"  PRINT A$  INPUT A$  IF A$=\"X\" THEN\n");
-        c26_puts("FUNCTIONS: RND ABS PEEK TI FB\n");
+        c26_puts("FUNCTIONS: RND ABS PEEK TI FB TIME  STRINGS: TIME$\n");
         return;
     }
     exec_t result = exec_statement(line, -1);

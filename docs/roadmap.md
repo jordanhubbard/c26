@@ -99,6 +99,15 @@ verdict is in docs/experiment.md. **The charted course is complete.**
   `IF A$ = "..."` / `<>` comparison, layered over the numeric evaluator
   without disturbing it. `EDIT n` replays a stored line into the editor for
   in-place editing. Gated in host tests and smoke.
+- **Delivered 2026-07-17: real-time clock.** The goldfish RTC (a real
+  QEMU virt device) gives the machine wall-clock time; BASIC `TIME`
+  returns Unix seconds and `TIME$` an `HH:MM:SS` string. Gated by a
+  sanity bound so the live value stays deterministic to check.
+
+Deliberately NOT shipped: TCP and DNS. They cannot be verified
+deterministically without external network access, and an ungated network
+claim would violate this project's rule that every capability is
+machine-checked. They remain honest future work, not silent stubs.
 
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.

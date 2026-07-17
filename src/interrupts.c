@@ -128,6 +128,17 @@ void c26_idle(void)
     __asm__ volatile("wfi");
 }
 
+uint64_t c26_rtc_seconds(void)
+{
+    /* Goldfish RTC on QEMU virt: 64-bit nanoseconds since the Unix epoch,
+       read low word first to latch. */
+    volatile uint32_t *rtc = (volatile uint32_t *)0x101000UL;
+    uint64_t low = rtc[0];
+    uint64_t high = rtc[1];
+    uint64_t nanos = (high << 32) | low;
+    return nanos / 1000000000ULL;
+}
+
 void c26_poweroff(void)
 {
     /* SiFive test finisher on QEMU virt: a real emulated device whose

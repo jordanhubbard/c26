@@ -123,6 +123,11 @@ void c26_idle(void)
     ticks++;
 }
 
+uint64_t c26_rtc_seconds(void)
+{
+    return 1752700000ULL; /* a fixed 2025 timestamp for deterministic tests */
+}
+
 void c26_io_pump(void)
 {
     ticks++;

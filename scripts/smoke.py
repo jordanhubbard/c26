@@ -177,6 +177,7 @@ sound 9,440
 sound 0,0
 device write 128 99
 device read 128
+print "clock ";time
 new
 10 print "old version"
 save boot
@@ -408,6 +409,10 @@ def main() -> int:
                          first_output)
     if activity is None or int(activity.group(1)) == 0 or int(activity.group(2)) == 0:
         failures.append("CLINT/PLIC interrupt counters did not advance")
+    # The goldfish RTC must report a real wall-clock (after 2023-11).
+    clock = re.search(r"CLOCK (\d+)", first_output)
+    if clock is None or int(clock.group(1)) < 1700000000:
+        failures.append(f"RTC did not report a real time: {clock and clock.group(1)}")
     if failures:
         sys.stderr.write(first_output)
         sys.stderr.write("\n" + "\n".join(failures) + "\n")

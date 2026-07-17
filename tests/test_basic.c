@@ -188,6 +188,13 @@ int main(void)
     command("list");
     expect_absent("10 PRINT 1", "line delete");
 
+    /* Real-time clock */
+    command("print time");
+    expect("1752700000\n", "rtc seconds");
+    command("t$ = time$");
+    command("print t$");
+    expect(":", "time$ formatted");
+
     /* String variables */
     command("new");
     command("a$ = \"hello\"");
