@@ -53,6 +53,8 @@ FIRST_BOOT_MARKERS = [
     "1084",              # INPUT round-trip: 42*2+1000
     "COMPARE OK",        # IF true branch
     "IF DONE",           # IF false branch skipped, program continued
+    "MACHINE: COMMODORE",  # string var assign, concat, PRINT
+    "AFFIRMATIVE",         # string INPUT + string IF comparison
     "?ILLEGAL QUANTITY ERROR",  # SOUND rejects voice 9
     "DEVICE WRITE OK",
     "DEVICE READ returned 99",
@@ -156,6 +158,14 @@ new
 20 if 1>2 then print "bad branch"
 30 print "if done"
 run
+new
+10 a$ = "commo"
+20 b$ = a$ + "dore"
+30 print "machine: ";b$
+40 input n$
+50 if n$ = "yes" then print "affirmative"
+run
+yes
 screen 1
 plot 10,10
 print fb

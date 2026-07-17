@@ -68,9 +68,11 @@ host operating system.
 - BASIC hardware statements over the SDKs: `SCREEN`, `CLS`, `COLOR` (C64
   palette or 24-bit RGB), `PLOT`, `LINE`, `RECT`, `TEXT`, `SOUND`, `DEVICE
   READ/WRITE`, `ROBOT`, plus `PEEK`/`POKE` compatibility aliases.
-- `LIST`, `RUN`, `NEW`, `DIR`, `SAVE`, `LOAD`, `DELETE`, `RENAME` manage
-  stored programs (256 lines of 80 characters); `RUN "NAME"` launches a
-  cartridge.
+- `LIST`, `EDIT`, `RUN`, `NEW`, `DIR`, `SAVE`, `LOAD`, `DELETE`, `RENAME`
+  manage stored programs (256 lines of 80 characters); `RUN NAME` launches
+  a cartridge; `EDIT n` recalls a line for in-place editing.
+- String variables `A$`..`Z$` with assignment, concatenation, `PRINT`,
+  `INPUT`, and `IF A$ = "..."` comparison, alongside the numeric engine.
 - `c26_gl`-style software 3D SDK with filled triangles, color interpolation,
   a depth buffer, and a CPU ray tracer.
 - Eight-voice, 48 kHz stereo audio mixer with waveforms, pan, envelopes, and a

@@ -43,6 +43,7 @@ typedef struct {
 } for_frame_t;
 
 static int64_t vars[26];
+static char strvars[26][64];
 static char input_line[96];
 static size_t input_length;
 static size_t input_cursor;
@@ -50,6 +51,8 @@ static char history[4][96];
 static int history_count;
 static int history_browse; /* -1 = not browsing */
 static int escape_state;   /* serial ANSI arrows: 0 none, 1 ESC, 2 ESC[ */
+static char pending_edit[96]; /* text to replay into the editor after prompt */
+static int has_pending_edit;
 static basic_line_t program[BASIC_LINE_COUNT];
 static size_t program_count;
 static char file_buffer[C26_FS_FILE_MAX + 1];
@@ -464,6 +467,51 @@ static exec_t fail(const char *message)
 
 static exec_t exec_statement(const char *text, long pc);
 
+/* ------------------------------------------------------------------ */
+/* String variables (A$..Z$): a parallel layer over the numeric engine  */
+
+static int is_string_ref(const char *cursor)
+{
+    cursor = c26_skip_spaces(cursor);
+    return *cursor == '"' || (is_upper(*cursor) && cursor[1] == '$');
+}
+
+/* Evaluates a string expression (literals and A$ joined by '+') into out. */
+static int eval_string(parser_t *p, char *out, size_t cap)
+{
+    size_t length = 0;
+    for (;;) {
+        const char *cursor = c26_skip_spaces(p->cursor);
+        if (*cursor == '"') {
+            cursor++;
+            while (*cursor != '\0' && *cursor != '"') {
+                if (length + 1 < cap) out[length++] = *cursor;
+                cursor++;
+            }
+            if (*cursor != '"') {
+                set_error(p, "SYNTAX");
+                return 0;
+            }
+            p->cursor = cursor + 1;
+        } else if (is_upper(*cursor) && cursor[1] == '$') {
+            const char *value = strvars[*cursor - 'A'];
+            while (*value != '\0') {
+                if (length + 1 < cap) out[length++] = *value;
+                value++;
+            }
+            p->cursor = cursor + 2;
+        } else {
+            set_error(p, "SYNTAX");
+            return 0;
+        }
+        if (!match_char(p, '+')) {
+            break;
+        }
+    }
+    out[length] = '\0';
+    return 1;
+}
+
 static exec_t exec_print(parser_t *p)
 {
     if (parse_end(p)) {
@@ -471,16 +519,12 @@ static exec_t exec_print(parser_t *p)
         return ok_next();
     }
     for (;;) {
-        const char *cursor = c26_skip_spaces(p->cursor);
-        if (*cursor == '"') {
-            cursor++;
-            while (*cursor != '\0' && *cursor != '"') {
-                c26_putc(*cursor++);
+        if (is_string_ref(p->cursor)) {
+            char buffer[256];
+            if (!eval_string(p, buffer, sizeof(buffer))) {
+                return fail(p->error != 0 ? p->error : "SYNTAX");
             }
-            if (*cursor != '"') {
-                return fail("SYNTAX");
-            }
-            p->cursor = cursor + 1;
+            c26_puts(buffer);
         } else {
             int64_t value = parse_expr(p);
             if (p->error != 0) {
@@ -512,7 +556,28 @@ static exec_t exec_print(parser_t *p)
 static exec_t exec_assign(parser_t *p)
 {
     const char *cursor = c26_skip_spaces(p->cursor);
-    if (!is_upper(*cursor) || is_upper(cursor[1])) {
+    if (!is_upper(*cursor)) {
+        return fail("SYNTAX");
+    }
+    if (cursor[1] == '$') { /* string assignment: A$ = <string expr> */
+        int index = *cursor - 'A';
+        p->cursor = cursor + 2;
+        if (!match_char(p, '=')) {
+            return fail("SYNTAX");
+        }
+        char buffer[64];
+        if (!eval_string(p, buffer, sizeof(buffer)) || !parse_end(p)) {
+            return fail(p->error != 0 ? p->error : "SYNTAX");
+        }
+        size_t i = 0;
+        while (buffer[i] != '\0' && i + 1 < sizeof(strvars[0])) {
+            strvars[index][i] = buffer[i];
+            i++;
+        }
+        strvars[index][i] = '\0';
+        return ok_next();
+    }
+    if (is_upper(cursor[1])) {
         return fail("SYNTAX");
     }
     int index = *cursor - 'A';
@@ -528,11 +593,40 @@ static exec_t exec_assign(parser_t *p)
     return ok_next();
 }
 
+static int strings_equal(const char *a, const char *b)
+{
+    while (*a != '\0' && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
 static exec_t exec_if(parser_t *p, long pc)
 {
-    int64_t condition = parse_expr(p);
-    if (p->error != 0) {
-        return fail(p->error);
+    int64_t condition;
+    if (is_string_ref(p->cursor)) { /* IF A$ = "..." [<>] */
+        char left[64];
+        if (!eval_string(p, left, sizeof(left))) {
+            return fail(p->error != 0 ? p->error : "SYNTAX");
+        }
+        const char *op = c26_skip_spaces(p->cursor);
+        int not_equal = op[0] == '<' && op[1] == '>';
+        if (op[0] != '=' && !not_equal) {
+            return fail("SYNTAX");
+        }
+        p->cursor = op + (not_equal ? 2 : 1);
+        char right[64];
+        if (!eval_string(p, right, sizeof(right))) {
+            return fail(p->error != 0 ? p->error : "SYNTAX");
+        }
+        int equal = strings_equal(left, right);
+        condition = (not_equal ? !equal : equal) ? -1 : 0;
+    } else {
+        condition = parse_expr(p);
+        if (p->error != 0) {
+            return fail(p->error);
+        }
     }
     int has_then = match_word(p, "THEN");
     int has_goto = has_then ? 0 : match_word(p, "GOTO");
@@ -637,7 +731,23 @@ static exec_t exec_input(parser_t *p, long pc)
         return fail("ILLEGAL DIRECT");
     }
     const char *cursor = c26_skip_spaces(p->cursor);
-    if (!is_upper(*cursor) || is_upper(cursor[1])) {
+    if (!is_upper(*cursor)) {
+        return fail("SYNTAX");
+    }
+    if (cursor[1] == '$') { /* INPUT A$ reads a whole line as text */
+        int index = *cursor - 'A';
+        p->cursor = cursor + 2;
+        if (!parse_end(p)) {
+            return fail("SYNTAX");
+        }
+        c26_puts("? ");
+        run_flush();
+        if (!input_read_line(strvars[index], sizeof(strvars[0]))) {
+            strvars[index][0] = '\0';
+        }
+        return ok_next();
+    }
+    if (is_upper(cursor[1])) {
         return fail("SYNTAX");
     }
     int index = *cursor - 'A';
@@ -1374,6 +1484,27 @@ static void process_line(const char *line)
         list_program();
         return;
     }
+    if (keyword(line, "EDIT")) {
+        const char *cursor = line + 4;
+        uint64_t number = c26_parse_uint(&cursor);
+        int index = find_line((uint16_t)number);
+        if (index < 0) {
+            c26_puts("?UNDEFINED LINE ERROR\n");
+            return;
+        }
+        /* Stage "<number> <text>" to be replayed into the line editor,
+           so the stored line reappears ready to arrow through and edit. */
+        size_t used = append_uint(pending_edit, 0, sizeof(pending_edit),
+                                  program[index].number);
+        pending_edit[used++] = ' ';
+        const char *text = program[index].text;
+        while (*text != '\0' && used + 1 < sizeof(pending_edit)) {
+            pending_edit[used++] = *text++;
+        }
+        pending_edit[used] = '\0';
+        has_pending_edit = 1;
+        return;
+    }
     if (keyword(line, "RUN")) {
         const char *cursor = c26_skip_spaces(line + 3);
         if (*cursor == '"' || is_upper(*cursor)) {
@@ -1403,6 +1534,10 @@ static void process_line(const char *line)
     }
     if (keyword(line, "NEW")) {
         program_count = 0;
+        for (int i = 0; i < 26; i++) {
+            vars[i] = 0;
+            strvars[i][0] = '\0';
+        }
         c26_puts("NEW PROGRAM\n");
         c26_desktop_invalidate();
         return;
@@ -1485,7 +1620,8 @@ static void process_line(const char *line)
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
         c26_puts("DESKTOP: WINDOW J,X,Y  FOCUS J  SEND J,\"MSG\"\n");
-        c26_puts("LIST RUN NEW DIR SAVE LOAD DELETE RENAME RUN \"CART\" JOBS KILL BYE HELP\n");
+        c26_puts("LIST EDIT RUN NEW DIR SAVE LOAD DELETE RENAME RUN NAME JOBS KILL BYE HELP\n");
+        c26_puts("STRINGS: A$=\"TEXT\"  PRINT A$  INPUT A$  IF A$=\"X\" THEN\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB\n");
         return;
     }
@@ -1757,6 +1893,12 @@ void c26_basic_feed_char(char ch)
         input_cursor = 0;
         process_line(input_line);
         prompt();
+        if (has_pending_edit) {
+            has_pending_edit = 0;
+            for (const char *e = pending_edit; *e != '\0'; e++) {
+                editor_insert(*e);
+            }
+        }
         return;
     }
     if (ch == '\b' || ch == 0x7f) {

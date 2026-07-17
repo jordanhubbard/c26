@@ -188,6 +188,33 @@ int main(void)
     command("list");
     expect_absent("10 PRINT 1", "line delete");
 
+    /* String variables */
+    command("new");
+    command("a$ = \"hello\"");
+    command("print a$");
+    expect("HELLO\n", "string assign+print");
+    command("b$ = a$ + \" world\"");
+    command("print b$");
+    expect("HELLO WORLD\n", "string concat");
+    command("print \"x=\";a$");
+    expect("X=HELLO\n", "print literal then string var");
+    command("new");
+    command("10 n$ = \"yes\"");
+    command("20 if n$ = \"yes\" then print \"matched\"");
+    command("30 if n$ <> \"no\" then print \"differs\"");
+    command("40 if n$ = \"no\" then print \"bad\"");
+    command("run");
+    expect("MATCHED\n", "string if equal");
+    expect("DIFFERS\n", "string if not-equal");
+    expect_absent("BAD", "string if false branch");
+    command("new");
+    command("10 input s$");
+    command("20 print \"got \";s$");
+    shim_output_reset();
+    shim_pending_input("WORLD\n");
+    feed("run\n");
+    expect("GOT WORLD\n", "string input");
+
     /* Line editor: cursor movement, mid-line insert/delete, history. */
     command("print 3\x1f""12"); /* left once, insert before the 3 */
     expect("123\n", "insert before cursor");

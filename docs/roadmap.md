@@ -93,6 +93,13 @@ built-in language. C26FS filenames now allow '.'. The experiment's closing
 verdict is in docs/experiment.md. **The charted course is complete.**
 
 ## Optional follow-ups (foundation is done)
+
+- **Delivered 2026-07-17: BASIC string variables + EDIT.** A$..Z$ string
+  variables with assignment, concatenation (`+`), `PRINT`, `INPUT`, and
+  `IF A$ = "..."` / `<>` comparison, layered over the numeric evaluator
+  without disturbing it. `EDIT n` replays a stored line into the editor for
+  in-place editing. Gated in host tests and smoke.
+
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.
 - **M6 — App suite + networking.** virtio-net with a minimal honest IP
