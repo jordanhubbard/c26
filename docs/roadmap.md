@@ -53,6 +53,17 @@ to move, window-local mouse, window_size() layout (ABI v2). Bounded mailbox
 IPC (send/recv) between jobs; apps/ping + apps/pong gate the round trip and
 an FB checksum gates the compositing, headlessly.
 
+## Delivered: M5 — UI toolkit + the first real apps (2026-07-17)
+
+apps/lib/ui.*: a small immediate-mode toolkit (titlebar, rows, status,
+click hit-testing, throttled present) linked into cartridges. FILES: browse
+C26FS, launch cartridges via the new spawn syscall, delete, or open the
+selection in EDIT with the filename handed over IPC. EDIT: a windowed text
+editor (arrows via new getchar key codes, Ctrl-S/Ctrl-Q). BYE powers the
+machine off through the SiFive test finisher; HALT is the immediate debug
+variant. The smoke gate types into EDIT, saves, lists the file, exercises
+FILES' spawn error path, and ends with a guest-initiated power-off.
+
 ## Remaining course (in priority order)
 - **M5 — UI toolkit.** c26_ui widgets/event loop; Files, terminal, and a
   text editor become windowed apps.

@@ -556,6 +556,11 @@ static long do_syscall(c26_user_frame_t *frame)
         peer->mail_head++;
         return 1;
     }
+    case C26_SYS_SPAWN: {
+        const char *name = user_string(a0);
+        if (name == 0) break;
+        return c26_cart_run(name);
+    }
     case C26_SYS_RECV: {
         if (process->mail_tail == process->mail_head) {
             return -1;

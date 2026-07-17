@@ -31,6 +31,8 @@ replacing magic memory addresses with typed SDK calls.
 | Multitasking | 4 concurrent processes, round-robin slices, JOBS/KILL |
 | Windows | Movable z-ordered windows over the console root; click/drag/Tab focus |
 | IPC | Bounded per-process mailboxes; send/recv syscalls |
+| Applications | c26_ui toolkit; FILES browser/launcher (spawn), EDIT text editor |
+| Power | BYE/HALT power off via the SiFive test finisher |
 | Display | 640x480x32 software surface on a virtio-GPU scanout |
 | Console | 100x45 scrolling text console, printable-ASCII 5x7 font |
 | 2D/3D | Pixel primitives, text, depth-tested colored triangles |

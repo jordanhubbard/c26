@@ -27,7 +27,8 @@ OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
 	-Wl,--no-relax
-CART_NAMES := paint crash spin ticker ping pong
+CART_NAMES := paint crash spin ticker ping pong files edit
+CART_LIB := $(wildcard apps/lib/*.c)
 CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
 QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M
@@ -83,8 +84,8 @@ $(BUILD)/%.S.o: src/%.S
 $(ELF): $(OBJS)
 	$(CLANG) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
 
-$(BUILD)/%.elf: apps/%/main.c apps/crt0.S apps/cart.ld include/c26_api.h | $(BUILD)
-	$(CLANG) $(CFLAGS) $(CART_LDFLAGS) apps/crt0.S $< -o $@
+$(BUILD)/%.elf: apps/%/main.c apps/crt0.S apps/cart.ld include/c26_api.h $(CART_LIB) $(wildcard apps/lib/*.h) | $(BUILD)
+	$(CLANG) $(CFLAGS) -Iapps/lib $(CART_LDFLAGS) apps/crt0.S $< $(CART_LIB) -o $@
 
 $(BUILD)/%.cart: $(BUILD)/%.elf
 	$(OBJCOPY) -O binary $< $@

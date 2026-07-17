@@ -51,6 +51,7 @@ STUB(stub_dev_write8, C26_SYS_DEV_WRITE8)
 STUB(stub_window_size, C26_SYS_WINDOW_SIZE)
 STUB(stub_send, C26_SYS_SEND)
 STUB(stub_recv, C26_SYS_RECV)
+STUB(stub_spawn, C26_SYS_SPAWN)
 
     /* c26_api_t, field for field. */
     .align 3
@@ -85,3 +86,4 @@ c26_user_api:
     .quad stub_window_size
     .quad stub_send
     .quad stub_recv
+    .quad stub_spawn

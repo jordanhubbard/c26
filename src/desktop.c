@@ -242,6 +242,23 @@ static void cart_event(c26_input_event_t event)
         c26_basic_feed_char('\b');
         return;
     }
+    /* Arrow keys reach apps as the C26_KEY_* codes from c26_api.h. */
+    if (event.code == KEY_UP) {
+        c26_basic_feed_char(0x1c);
+        return;
+    }
+    if (event.code == KEY_DOWN) {
+        c26_basic_feed_char(0x1d);
+        return;
+    }
+    if (event.code == KEY_RIGHT) {
+        c26_basic_feed_char(0x1e);
+        return;
+    }
+    if (event.code == KEY_LEFT) {
+        c26_basic_feed_char(0x1f);
+        return;
+    }
     char ch = c26_input_key_to_ascii(event.code, shift_down);
     if (ch != 0) {
         c26_basic_feed_char(ch);

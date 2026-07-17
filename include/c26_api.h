@@ -86,6 +86,16 @@ typedef struct {
        or -1 when the mailbox is empty (from may be NULL). */
     int (*send)(int job, const void *data, size_t size);
     int (*recv)(int *from, void *data, size_t capacity);
+
+    /* Launch another cartridge from C26FS; returns its job number or -1.
+       The new job takes focus. */
+    int (*spawn)(const char *name);
 } c26_api_t;
+
+/* Arrow keys are delivered through getchar() as these codes. */
+#define C26_KEY_UP 0x1c
+#define C26_KEY_DOWN 0x1d
+#define C26_KEY_RIGHT 0x1e
+#define C26_KEY_LEFT 0x1f
 
 #endif

@@ -39,6 +39,13 @@ host operating system.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate.
+- A UI toolkit (`apps/lib/ui.*`) and the first real applications built on
+  it: `FILES` (browse, launch via the `spawn` syscall, delete, or open a
+  file in the editor — the filename travels over IPC) and `EDIT` (a
+  windowed text editor with arrows, Ctrl-S save, Ctrl-Q quit).
+- Power control from inside the machine: `BYE`/`EXIT`/`QUIT`/`SHUTDOWN`
+  say goodbye and power off through QEMU virt's SiFive test finisher;
+  `HALT` is the blunt debug variant — immediate exit, no ceremony.
 - 640x480 32-bit virtio-GPU scanout with software-buffer fallback, rendering
   a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with

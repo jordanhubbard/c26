@@ -35,7 +35,8 @@
 #define C26_SYS_WINDOW_SIZE 25
 #define C26_SYS_SEND 26
 #define C26_SYS_RECV 27
-#define C26_SYS_COUNT 28
+#define C26_SYS_SPAWN 28
+#define C26_SYS_COUNT 29
 
 /* Trap frame layout: mepc at 0, x1..x31 at 8*N, kernel trap sp at 256,
  * kernel callee-saved context (ra, sp, s0-s11) at 264. trap.S depends on

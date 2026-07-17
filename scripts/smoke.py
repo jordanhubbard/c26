@@ -55,9 +55,9 @@ FIRST_BOOT_MARKERS = [
 ]
 
 SECOND_BOOT_MARKERS = [
-    # DEMO + BOOT written by the guest, six cartridges installed host-side
+    # DEMO + BOOT written by the guest, eight cartridges installed host-side
     # between boots — fsinstall.py modifying a guest-formatted filesystem.
-    "C26FS: mounted 8 file(s)",
+    "C26FS: mounted 10 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -91,6 +91,17 @@ SECOND_BOOT_MARKERS = [
     "PING CART ONLINE",
     "IPC ROUNDTRIP OK FROM JOB 0",
     "71001",
+    # The M5 apps: EDIT saves a file typed through the toolkit; FILES lists
+    # it, and its R action exercises the spawn syscall (DEMO is a BASIC
+    # file, so the launcher's error path answers).
+    "EDIT CART ONLINE",
+    "SAVED NOTES",
+    "NOTES",
+    "FILES CART ONLINE",
+    "FILES SEES",
+    "Error: not a c26 cartridge",
+    "92002",
+    "SHUTTING DOWN - GOODBYE",
 ]
 
 FIRST_BOOT_INPUT = """\
@@ -168,6 +179,13 @@ SECOND_BOOT_STAGES = [
     ('print fb\nrun "pong"\n', 3.0),
     ('\x14print fb\nrun "ping"\n', 4.0),
     ('\x14kill 0\nprint 71000+1\n', 4.0),
+    ('run "edit"\n', 3.0),
+    ('SMOKE NOTE\x13', 2.0),   # type into EDIT, Ctrl-S saves
+    ('\x11', 2.0),             # Ctrl-Q quits the editor
+    ('dir\nrun "files"\n', 3.0),
+    ('r', 2.0),                # R on the first entry (DEMO): spawn error path
+    ('q', 2.0),                # quit FILES
+    ('print 92000+2\nbye\n', 4.0),  # the machine powers itself off
 ]
 
 
@@ -310,7 +328,8 @@ def main() -> int:
     install = run(["python3", "scripts/fsinstall.py", str(DISK),
                    "PAINT=build/paint.cart", "CRASH=build/crash.cart",
                    "SPIN=build/spin.cart", "TICKER=build/ticker.cart",
-                   "PING=build/ping.cart", "PONG=build/pong.cart"])
+                   "PING=build/ping.cart", "PONG=build/pong.cart",
+                   "FILES=build/files.cart", "EDIT=build/edit.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
@@ -339,7 +358,8 @@ def main() -> int:
     print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "
           "persistence, multiprocessing U-mode cartridges (clean run, "
           "contained fault, preemptive kill, concurrent background job), "
-          "a window composited over the console, and an IPC round trip")
+          "windows + IPC, the FILES/EDIT toolkit apps with spawn, and a "
+          "guest-initiated power-off")
     return 0
 
 

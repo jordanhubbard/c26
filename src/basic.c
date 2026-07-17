@@ -1366,6 +1366,10 @@ static void process_line(const char *line)
         c26_console_flush();
         c26_poweroff();
     }
+    if (keyword(line, "HALT")) {
+        /* Debug exit: no farewell, no flush — the machine stops NOW. */
+        c26_poweroff();
+    }
     if (keyword(line, "JOBS")) {
         c26_puts("JOBS:\n");
         c26_cart_list_jobs();
