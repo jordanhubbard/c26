@@ -59,7 +59,11 @@ host operating system.
 - Self-hosting: `apps/asm` is a two-pass RV64 assembler that runs on the
   machine, turning an assembly source file from C26FS into a runnable
   cartridge (`RUN ASM`, type `HELLO.ASM HI`, then `RUN HI`). A fresh disk
-  seeds `HELLO.ASM` so the machine can program itself out of the box.
+  seeds `HELLO.ASM` so the machine can program itself out of the box. It
+  supports `.MACRO`/`.ENDM` with `\1..\9` args, `.INCLUDE`, expression
+  operands (`MSG+4`, `617+617`), and a data section
+  (`.BYTE`/`.WORD`/`.QUAD`/`.ASCIZ`/`.ALIGN`); `MONITOR` disassembles what it
+  produces.
 - A scriptable desktop: BASIC statements `WINDOW j,x,y`, `FOCUS j`, and
   `SEND j,"msg"` drive the window manager and inter-process messaging from
   the built-in language.

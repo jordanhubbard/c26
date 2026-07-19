@@ -106,7 +106,7 @@ class Filesystem:
 
     def install(self, name: str, data: bytes) -> None:
         if not (0 < len(name) <= NAME_MAX) or not all(
-                c.isupper() or c.isdigit() or c in "_-" for c in name):
+                c.isupper() or c.isdigit() or c in "_-." for c in name):
             raise SystemExit(f"fsinstall: invalid name {name!r}")
         if not 0 < len(data) <= FILE_MAX:
             raise SystemExit(f"fsinstall: bad size for {name}")

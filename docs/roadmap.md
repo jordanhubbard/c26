@@ -232,6 +232,19 @@ when Homebrew LLVM is absent) and `qemu-system-misc`, so no bespoke setup is
 needed. The honesty rule is now enforced automatically, not by hand; a green
 badge on the README reflects the live gate (first run: 4m04s end to end).
 
+## Delivered: richer on-board assembler (2026-07-19)
+
+`apps/asm` gained a preprocessor pass (run before its two assembly passes, so
+the existing self-hosting path is untouched): `.MACRO`/`.ENDM` with `\1..\9`
+argument substitution, macro invocation, and `.INCLUDE` of another C26FS
+source. Operands may now be expressions — numbers and symbols joined by
+`+ - *`, applied left to right (`MSG+4`, `END-START`, `617+617`) — on top of
+the existing data section (`.BYTE`/`.WORD`/`.QUAD`/`.ASCIZ`/`.ALIGN`). The
+smoke gate assembles `tests/asm/feat.asm` (which exercises a macro, an
+include, and an expression) and runs the result, which prints the included
+message and the expression's value (1234). `scripts/fsinstall.py` now accepts
+`.` in names, matching C26FS, so host-side source fixtures install cleanly.
+
 ## Delivered: application suite + an RV64 disassembler (2026-07-19)
 
 Seven new cartridges, each a U-mode program built on the frozen ABI and gated

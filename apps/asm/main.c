@@ -170,6 +170,52 @@ static int64_t parse_number(const char *token, int *ok)
 
 /* Value of an operand that may be a number or a label (label = absolute
  * cart address). */
+/* Evaluate one term (a number or a symbol) into *value; returns 0 on an
+   undefined symbol in pass 2. */
+static int term_value(const char *term, int line, int64_t *value)
+{
+    int ok;
+    *value = parse_number(term, &ok);
+    if (ok) return 1;
+    uint32_t offset;
+    if (find_symbol(term, &offset)) {
+        *value = (int64_t)offset;
+        return 1;
+    }
+    if (pass == 1) { /* forward reference: any value works for sizing */
+        *value = 0;
+        return 1;
+    }
+    fail(line, "UNDEFINED SYMBOL");
+    return 0;
+}
+
+/* Evaluate an expression operand: terms (numbers or symbols) joined by
+   + - * and applied left to right, e.g. MSG+4, COUNT*2, END-START. */
+static int64_t eval_expr(const char *token, int line)
+{
+    int64_t acc = 0;
+    char op = '+';
+    int i = 0;
+    while (token[i] != '\0') {
+        char term[24];
+        int j = 0;
+        while (token[i] != '\0' && token[i] != '+' && token[i] != '-' &&
+               token[i] != '*' && j < 23) {
+            term[j++] = token[i++];
+        }
+        term[j] = '\0';
+        int64_t v = 0;
+        term_value(term, line, &v);
+        if (op == '+') acc += v;
+        else if (op == '-') acc -= v;
+        else acc *= v;
+        if (token[i] == '\0') break;
+        op = token[i++];
+    }
+    return acc;
+}
+
 static int64_t operand_value(const char *token, int line, int *is_label,
                              uint32_t *label_offset)
 {
@@ -184,6 +230,13 @@ static int64_t operand_value(const char *token, int line, int *is_label,
         if (is_label != 0) *is_label = 1;
         if (label_offset != 0) *label_offset = offset;
         return (int64_t)offset;
+    }
+    /* An expression operand: a symbol or number followed by + - * and more. */
+    for (int i = 1; token[i] != '\0'; i++) {
+        if (token[i] == '+' || token[i] == '-' || token[i] == '*') {
+            if (is_label != 0) *is_label = 0;
+            return eval_expr(token, line);
+        }
     }
     if (pass == 1) {
         /* Forward reference: size is what matters in pass 1. */
@@ -529,6 +582,149 @@ static void run_pass(void)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Preprocessor: .MACRO/.ENDM with \1..\9 args, macro invocation, and
+ * .INCLUDE, all expanded into `source` before the two assembly passes. */
+
+#define MACRO_MAX 16
+#define MACRO_BODY_MAX 2048
+#define INCLUDE_MAX 4000
+static struct {
+    char name[24];
+    int start;
+    int len;
+} macros[MACRO_MAX];
+static int macro_count;
+static char macro_bodies[MACRO_BODY_MAX];
+static int macro_body_used;
+static char expanded[SOURCE_MAX + 1];
+static char include_buf[INCLUDE_MAX];
+
+static int find_macro(const char *name)
+{
+    for (int i = 0; i < macro_count; i++) {
+        if (str_eq(macros[i].name, name)) return i;
+    }
+    return -1;
+}
+
+/* Split [s,e) into up to 9 whitespace/comma-separated arg tokens. */
+static int split_args(const char *s, const char *e, char args[9][24])
+{
+    int n = 0;
+    while (s < e && n < 9) {
+        while (s < e && (*s == ' ' || *s == '\t' || *s == ',')) s++;
+        if (s >= e) break;
+        int j = 0;
+        while (s < e && *s != ' ' && *s != '\t' && *s != ',' && j < 23) {
+            args[n][j++] = *s++;
+        }
+        args[n][j] = '\0';
+        n++;
+    }
+    return n;
+}
+
+static void emit_range(int *out, const char *s, const char *e)
+{
+    while (s < e && *out < SOURCE_MAX) expanded[(*out)++] = *s++;
+    if (*out < SOURCE_MAX) expanded[(*out)++] = '\n';
+}
+
+/* Emit macro body with \1..\9 replaced by the invocation's args. */
+static void expand_macro(int mi, const char *argstart, const char *argend,
+                         int *out)
+{
+    char args[9][24];
+    for (int i = 0; i < 9; i++) args[i][0] = '\0';
+    split_args(argstart, argend, args);
+    const char *b = &macro_bodies[macros[mi].start];
+    int len = macros[mi].len;
+    for (int i = 0; i < len && *out < SOURCE_MAX; i++) {
+        if (b[i] == '\\' && i + 1 < len && b[i + 1] >= '1' && b[i + 1] <= '9') {
+            const char *a = args[b[i + 1] - '1'];
+            while (*a != '\0' && *out < SOURCE_MAX) expanded[(*out)++] = *a++;
+            i++;
+        } else {
+            expanded[(*out)++] = b[i];
+        }
+    }
+}
+
+static void preprocess(void)
+{
+    macro_count = 0;
+    macro_body_used = 0;
+    int out = 0;
+    int in_macro = -1;
+    const char *p = source;
+    while (*p != '\0') {
+        const char *ls = p;
+        const char *le = p;
+        while (*le != '\0' && *le != '\n') le++;
+        const char *q = ls;
+        while (q < le && (*q == ' ' || *q == '\t')) q++;
+        char first[24];
+        int fi = 0;
+        while (q < le && *q != ' ' && *q != '\t' && fi < 23) first[fi++] = *q++;
+        first[fi] = '\0';
+        const char *rest = q;
+        while (rest < le && (*rest == ' ' || *rest == '\t')) rest++;
+
+        if (in_macro >= 0) {
+            if (str_eq(first, ".ENDM")) {
+                macros[in_macro].len = macro_body_used - macros[in_macro].start;
+                in_macro = -1;
+            } else {
+                const char *s = ls;
+                while (s < le && macro_body_used < MACRO_BODY_MAX) {
+                    macro_bodies[macro_body_used++] = *s++;
+                }
+                if (macro_body_used < MACRO_BODY_MAX) {
+                    macro_bodies[macro_body_used++] = '\n';
+                }
+            }
+        } else if (str_eq(first, ".MACRO")) {
+            char args[9][24];
+            int n = split_args(rest, le, args);
+            if (n >= 1 && macro_count < MACRO_MAX) {
+                in_macro = macro_count++;
+                str_copy(macros[in_macro].name, args[0], 24);
+                macros[in_macro].start = macro_body_used;
+                macros[in_macro].len = 0;
+            }
+        } else if (str_eq(first, ".INCLUDE")) {
+            char args[9][24];
+            split_args(rest, le, args);
+            char fn[16];
+            int k = 0;
+            for (const char *a = args[0]; *a != '\0' && k < 15; a++) {
+                if (*a != '"') fn[k++] = *a;
+            }
+            fn[k] = '\0';
+            size_t isz = 0;
+            if (g_api->fs_load(fn, include_buf, sizeof(include_buf) - 1, &isz)) {
+                for (size_t i = 0; i < isz; i++) {
+                    char c = include_buf[i];
+                    if (c >= 'a' && c <= 'z') c -= 32;
+                    if (out < SOURCE_MAX) expanded[out++] = c;
+                }
+                if (out < SOURCE_MAX) expanded[out++] = '\n';
+            }
+        } else {
+            int mi = find_macro(first);
+            if (mi >= 0) {
+                expand_macro(mi, rest, le, &out);
+            } else {
+                emit_range(&out, ls, le);
+            }
+        }
+        p = (*le == '\n') ? le + 1 : le;
+    }
+    expanded[out] = '\0';
+    for (int i = 0; i <= out; i++) source[i] = expanded[i];
+}
+
 static int assemble(const char *src_name, const char *dst_name)
 {
     size_t size = 0;
@@ -540,6 +736,7 @@ static int assemble(const char *src_name, const char *dst_name)
     for (size_t i = 0; i < size; i++) {
         if (source[i] >= 'a' && source[i] <= 'z') source[i] -= 32;
     }
+    preprocess();
     symbol_count = 0;
     error_at = 0;
     error_text = "";

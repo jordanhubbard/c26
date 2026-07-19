@@ -90,7 +90,7 @@ FIRST_BOOT_MARKERS = [
 SECOND_BOOT_MARKERS = [
     # DEMO + HELLO.ASM + BOOT written by the guest, twelve cartridges
     # installed host-side, HI assembled on the machine.
-    "C26FS: mounted 23 file(s)",
+    "C26FS: mounted 25 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -141,6 +141,10 @@ SECOND_BOOT_MARKERS = [
     "ASM CART ONLINE",
     "ASSEMBLED HELLO.ASM",
     "HELLO FROM SELF-HOSTED CODE",
+    # Richer assembler: macro expansion + .INCLUDE + expression operand.
+    "ASSEMBLED FEAT.ASM",
+    "MACRO ASM WORKS",
+    "1234",
     # M7 scriptable desktop: BASIC SEND delivers a message to a running
     # job across address spaces.
     "PONG GOT PING",
@@ -418,6 +422,12 @@ SECOND_BOOT_STAGES = [
     ('hello.asm hi\n', 3.0, 'ASSEMBLED HELLO.ASM'),  # assemble on the machine
     ('q', 2.0),
     ('run hi\n', 3.0, 'HELLO FROM SELF-HOSTED CODE'),  # run the assembled cart
+    # Richer assembler: FEAT.ASM uses a .MACRO with a \1 arg, .INCLUDE, and an
+    # expression operand (617+617); assemble it and run the result.
+    ('run asm\n', 3.0, 'ASM CART ONLINE'),
+    ('feat.asm featout\n', 3.0, 'ASSEMBLED FEAT.ASM'),
+    ('q', 2.0),
+    ('run featout\n', 3.0, 'MACRO ASM WORKS'),  # macro+include prints; expr=1234
     ('run pong\n', 2.0, 'PONG CART ONLINE'),
     ('\x14send 0,"PING"\n', 3.0, 'PONG GOT PING'),  # script a running job
     ('kill 0\n', 2.0),
@@ -599,7 +609,9 @@ def main() -> int:
                    "CALC=build/calc.cart", "CLOCK=build/clock.cart",
                    "HEXEDIT=build/hexedit.cart", "SHEET=build/sheet.cart",
                    "ROBOT=build/robot.cart", "SNAKE=build/snake.cart",
-                   "MONITOR=build/monitor.cart"])
+                   "MONITOR=build/monitor.cart",
+                   "FEAT.ASM=tests/asm/feat.asm",
+                   "FMSG.ASM=tests/asm/fmsg.asm"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
