@@ -55,7 +55,9 @@ host operating system.
   `SHEET` (a spreadsheet with live sums), `ROBOT` (a device-fabric control
   panel), `HEXEDIT` (a hex editor over C26FS files), `SNAKE` (a game), and
   `MONITOR` (an RV64 disassembler that reads back cartridges the on-board
-  assembler produces).
+  assembler produces), and `FETCH` (an HTTP-get client that resolves a host,
+  opens TCP to port 80, and shows the response — TCP and DNS reach cartridges
+  through the ABI, not just UDP).
 - Self-hosting: `apps/asm` is a two-pass RV64 assembler that runs on the
   machine, turning an assembly source file from C26FS into a runnable
   cartridge (`RUN ASM`, type `HELLO.ASM HI`, then `RUN HI`). A fresh disk
@@ -174,10 +176,12 @@ implementation over virtio-net — ARP, ICMP echo reply, UDP, a
 single-connection TCP client, and a DNS A-record resolver — on QEMU's user
 network (guest 10.0.2.15, gateway 10.0.2.2). A kernel UDP echo service on
 port 2600 is reachable from the host through `hostfwd`, and cartridges get
-`udp_bind`/`udp_send`/`udp_recv` syscalls. BASIC `TCP`/`RESOLVE` drive the
-TCP client and resolver; the smoke gate handshakes with a scripted host peer
-through QEMU `guestfwd`, so the TCP path is verified against a real,
-deterministic peer with no external network. The I2C and CAN SDKs remain
+`udp_bind`/`udp_send`/`udp_recv` plus (ABI v5) `tcp_connect`/`send`/`recv`/
+`close`/`state` and `dns_resolve` syscalls — the `FETCH` app does a real HTTP
+get over them. BASIC `TCP`/`RESOLVE` drive the same client and resolver; the
+smoke gate handshakes with a scripted host peer through QEMU `guestfwd` (which
+answers an HTTP GET with a canned response), so the TCP and HTTP paths are
+verified against a real, deterministic peer with no external network. The I2C and CAN SDKs remain
 deterministic in-kernel fabrics for safe demos; they do not claim physical
 buses. The 3D and ray-tracing paths run on the RISC-V CPU, which keeps their
 behavior available without a host graphics API.

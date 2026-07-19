@@ -232,6 +232,28 @@ when Homebrew LLVM is absent) and `qemu-system-misc`, so no bespoke setup is
 needed. The honesty rule is now enforced automatically, not by hand; a green
 badge on the README reflects the live gate (first run: 4m04s end to end).
 
+## Delivered: FETCH — HTTP from a cartridge, closing the network loop (2026-07-19)
+
+`apps/fetch` is an HTTP-get client: type a host (a name or a dotted-quad), and
+it resolves it (DNS), opens TCP to port 80, sends a `GET / HTTP/1.0`, and shows
+the response. To get there, the frozen ABI grew to **version 5** — the
+single-connection TCP client and the DNS resolver are now cartridge syscalls
+(`tcp_connect`/`send`/`recv`/`close`/`state`, `dns_resolve`), so the whole
+network stack reaches the app layer, not just UDP. The smoke gate's scripted
+`guestfwd` peer became content-aware: a GET gets a canned `HTTP/1.0` response
+whose body carries `C26-FETCH-OK`, anything else keeps the plain TCP echo — so
+one deterministic host peer gates both the raw TCP round-trip and the FETCH
+HTTP get. This closes the networking epic: every network capability — UDP, TCP,
+DNS, and HTTP — is now reachable from the built-in language and the cartridge
+layer, and machine-checked headlessly.
+
+**uIP/lwIP port (backlog 1c) — deliberately declined.** Its purpose was to
+demonstrate reuse where a bespoke stack didn't exist; now that a legible, fully
+gated TCP + DNS stack does (and HTTP rides on it from both BASIC and
+cartridges), importing a third-party stack would add tens of thousands of lines
+no one on this project can read for no new capability — the opposite of the
+machine's guiding principle. Recorded as an honest decision, not a gap.
+
 ## Consolidation review (2026-07-19)
 
 A pass of adversarial reviews over the session's new code (apps, the RV64

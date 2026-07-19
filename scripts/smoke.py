@@ -90,7 +90,7 @@ FIRST_BOOT_MARKERS = [
 SECOND_BOOT_MARKERS = [
     # DEMO + HELLO.ASM + BOOT written by the guest, twelve cartridges
     # installed host-side, HI assembled on the machine.
-    "C26FS: mounted 27 file(s)",
+    "C26FS: mounted 28 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -148,6 +148,10 @@ SECOND_BOOT_MARKERS = [
     # Tiny-C: a C subset compiled to a cartridge on the machine, then run.
     "TINYC COMPILED",
     "55",   # SUM.C: while-loop sum of 1..10, compiled and executed
+    # FETCH: a cartridge doing an HTTP GET over the TCP+DNS ABI syscalls.
+    "FETCH CONNECTED",
+    "C26-FETCH-OK",
+    "FETCH DONE",
     # M7 scriptable desktop: BASIC SEND delivers a message to a running
     # job across address spaces.
     "PONG GOT PING",
@@ -437,6 +441,11 @@ SECOND_BOOT_STAGES = [
     ('sum.c out\n', 3.0, 'TINYC COMPILED'),
     ('q', 2.0),
     ('run out\n', 3.0, '55'),   # loop sum 1..10 = 55, then 2*3+4 = 10
+    # FETCH: an HTTP GET from a cartridge, over the TCP+DNS ABI syscalls, to
+    # the scripted host peer (which answers a GET with a canned HTTP response).
+    ('run "fetch"\n', 3.0, 'FETCH CART ONLINE'),
+    ('10.0.2.100\n', 4.0, 'C26-FETCH-OK'),   # resolve, connect :80, GET, body
+    ('q', 2.0, 'FETCH CART EXIT'),
     ('run pong\n', 2.0, 'PONG CART ONLINE'),
     ('\x14send 0,"PING"\n', 3.0, 'PONG GOT PING'),  # script a running job
     ('kill 0\n', 2.0),
@@ -619,6 +628,7 @@ def main() -> int:
                    "HEXEDIT=build/hexedit.cart", "SHEET=build/sheet.cart",
                    "ROBOT=build/robot.cart", "SNAKE=build/snake.cart",
                    "MONITOR=build/monitor.cart", "TINYC=build/tinyc.cart",
+                   "FETCH=build/fetch.cart",
                    "FEAT.ASM=tests/asm/feat.asm",
                    "FMSG.ASM=tests/asm/fmsg.asm",
                    "SUM.C=tests/tinyc/sum.c"])
@@ -689,7 +699,8 @@ def main() -> int:
           "snake), an RV64 disassembler, and a self-hosting tiny-C compiler, "
           "a real UDP round trip, a kernel TCP "
           "client handshaking with a scripted host peer over guestfwd, DNS "
-          "resolution, and a guest-initiated power-off")
+          "resolution, an HTTP GET from the FETCH cartridge over the TCP/DNS "
+          "syscalls, and a guest-initiated power-off")
     return 0
 
 

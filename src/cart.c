@@ -791,6 +791,34 @@ static long do_syscall(c26_user_frame_t *frame)
     }
     case C26_SYS_RTC_SECONDS:
         return (long)c26_rtc_seconds();
+    case C26_SYS_TCP_CONNECT:
+        return c26_tcp_connect((uint32_t)a0, (uint16_t)a1);
+    case C26_SYS_TCP_SEND: {
+        unsigned int len = (unsigned int)a1;
+        uintptr_t p = user_ptr(a0, len == 0 ? 1 : len, 0);
+        if (p == 0) break;
+        return c26_tcp_send((const void *)p, len);
+    }
+    case C26_SYS_TCP_RECV: {
+        unsigned int cap = (unsigned int)a1;
+        uintptr_t p = user_ptr(a0, cap == 0 ? 1 : cap, 1);
+        if (p == 0) break;
+        return c26_tcp_recv((void *)p, cap);
+    }
+    case C26_SYS_TCP_CLOSE:
+        c26_tcp_close();
+        return 0;
+    case C26_SYS_TCP_STATE:
+        return c26_tcp_state();
+    case C26_SYS_DNS_RESOLVE: {
+        const char *name = user_string(a0);
+        uintptr_t out = user_ptr(a1, 4, 1);
+        if (name == 0 || out == 0) break;
+        uint32_t ip = 0;
+        int ok = c26_dns_resolve(name, &ip);
+        *(uint32_t *)out = ip;
+        return ok;
+    }
     case C26_SYS_SEND: {
         int target = (int)(int64_t)a0;
         if (target < 0 || target >= C26_NPROC ||

@@ -58,12 +58,18 @@ STUB(stub_udp_recv, C26_SYS_UDP_RECV)
 STUB(stub_clip_set, C26_SYS_CLIP_SET)
 STUB(stub_clip_get, C26_SYS_CLIP_GET)
 STUB(stub_rtc_seconds, C26_SYS_RTC_SECONDS)
+STUB(stub_tcp_connect, C26_SYS_TCP_CONNECT)
+STUB(stub_tcp_send, C26_SYS_TCP_SEND)
+STUB(stub_tcp_recv, C26_SYS_TCP_RECV)
+STUB(stub_tcp_close, C26_SYS_TCP_CLOSE)
+STUB(stub_tcp_state, C26_SYS_TCP_STATE)
+STUB(stub_dns_resolve, C26_SYS_DNS_RESOLVE)
 
     /* c26_api_t, field for field. */
     .align 3
     .globl c26_user_api
 c26_user_api:
-    .word 4                    /* version */
+    .word 5                    /* version */
     .word 0                    /* padding */
     .quad stub_puts
     .quad stub_putc
@@ -99,3 +105,9 @@ c26_user_api:
     .quad stub_clip_set
     .quad stub_clip_get
     .quad stub_rtc_seconds
+    .quad stub_tcp_connect
+    .quad stub_tcp_send
+    .quad stub_tcp_recv
+    .quad stub_tcp_close
+    .quad stub_tcp_state
+    .quad stub_dns_resolve

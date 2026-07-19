@@ -113,6 +113,19 @@ typedef struct {
 
     /* Wall-clock seconds since the Unix epoch, from the goldfish RTC. */
     uint64_t (*rtc_seconds)(void);
+
+    /* --- version 5: the single-connection TCP client and DNS resolver --- */
+
+    /* Non-blocking TCP: connect() starts the handshake (poll tcp_state until
+       2 = established or 5 = failed); recv returns bytes, 0 when idle, -1 at
+       EOF. dns_resolve fills *out_ip (host byte order); returns 1 on success.
+       A dotted-quad name resolves without a query. */
+    int (*tcp_connect)(uint32_t ip, uint16_t port);
+    int (*tcp_send)(const void *data, size_t size);
+    int (*tcp_recv)(void *buf, size_t capacity);
+    void (*tcp_close)(void);
+    int (*tcp_state)(void);
+    int (*dns_resolve)(const char *name, uint32_t *out_ip);
 } c26_api_t;
 
 /* Arrow keys are delivered through getchar() as these codes. */

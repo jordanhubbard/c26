@@ -42,7 +42,13 @@
 #define C26_SYS_CLIP_SET 32
 #define C26_SYS_CLIP_GET 33
 #define C26_SYS_RTC_SECONDS 34
-#define C26_SYS_COUNT 35
+#define C26_SYS_TCP_CONNECT 35
+#define C26_SYS_TCP_SEND 36
+#define C26_SYS_TCP_RECV 37
+#define C26_SYS_TCP_CLOSE 38
+#define C26_SYS_TCP_STATE 39
+#define C26_SYS_DNS_RESOLVE 40
+#define C26_SYS_COUNT 41
 
 /* Trap frame layout: mepc at 0, x1..x31 at 8*N, kernel trap sp at 256,
  * kernel callee-saved context (ra, sp, s0-s11) at 264. trap.S depends on
