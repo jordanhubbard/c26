@@ -232,6 +232,29 @@ when Homebrew LLVM is absent) and `qemu-system-misc`, so no bespoke setup is
 needed. The honesty rule is now enforced automatically, not by hand; a green
 badge on the README reflects the live gate (first run: 4m04s end to end).
 
+## Delivered: application suite + an RV64 disassembler (2026-07-19)
+
+Seven new cartridges, each a U-mode program built on the frozen ABI and gated
+in the smoke run (launch → drive → read a marker → quit):
+
+- **CALC** — a four-function calculator (mouse keypad + keyboard), prints
+  `CALC = <n>` per result.
+- **CLOCK** — a digital watch reading the goldfish RTC through a new ABI v4
+  `rtc_seconds()` syscall; shows `HH:MM:SS`.
+- **SHEET** — a 5×6 integer spreadsheet with live row/column sums and a grand
+  total (`SHEET TOTAL <n>`).
+- **ROBOT** — a control panel that writes channel values to the device fabric
+  (`dev_write8`) and reads them back (`dev_read8`), proving the control loop.
+- **HEXEDIT** — a hex editor over C26FS files (nibble editing, Ctrl-S save).
+- **SNAKE** — a self-playing-capable game (LCG food, tick-paced movement).
+- **MONITOR** — a real RV64 disassembler: it decodes the instruction subset
+  the on-board assembler emits (LUI/AUIPC/JAL/JALR, OP-IMM, OP, loads,
+  stores, branches, ECALL), shows a hex + mnemonic view of any C26FS file,
+  and defaults to the machine-assembled `HI` cartridge — RUN ASM to build a
+  program, RUN MONITOR to read it back. A startup self-test disassembles
+  known words (`addi x10, x0, 10`, `add x10, x10, x11`, `ret`) so the decoder
+  is machine-checked deterministically.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,

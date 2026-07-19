@@ -50,7 +50,12 @@ host operating system.
   in the editor — the filename travels over IPC), `EDIT` (a windowed text
   editor), `TRACKER` (an 8-voice step sequencer with saved patterns),
   `BREAKOUT` (mouse paddle, mixer sound effects), and `NET` (a UDP mailbox
-  that ACKs every datagram reaching it from the host).
+  that ACKs every datagram reaching it from the host). Plus `CALC` (a
+  four-function calculator), `CLOCK` (a digital watch reading the RTC),
+  `SHEET` (a spreadsheet with live sums), `ROBOT` (a device-fabric control
+  panel), `HEXEDIT` (a hex editor over C26FS files), `SNAKE` (a game), and
+  `MONITOR` (an RV64 disassembler that reads back cartridges the on-board
+  assembler produces).
 - Self-hosting: `apps/asm` is a two-pass RV64 assembler that runs on the
   machine, turning an assembly source file from C26FS into a runnable
   cartridge (`RUN ASM`, type `HELLO.ASM HI`, then `RUN HI`). A fresh disk

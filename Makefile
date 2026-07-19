@@ -27,7 +27,8 @@ OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
 	-Wl,--no-relax
-CART_NAMES := paint crash spin ticker ping pong files edit tracker breakout net asm
+CART_NAMES := paint crash spin ticker ping pong files edit tracker breakout net asm \
+              calc clock hexedit sheet robot snake monitor
 CART_LIB := $(wildcard apps/lib/*.c)
 CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 

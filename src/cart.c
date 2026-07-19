@@ -780,6 +780,8 @@ static long do_syscall(c26_user_frame_t *frame)
         if (p == 0) break;
         return (long)c26_clipboard_get((char *)p, cap);
     }
+    case C26_SYS_RTC_SECONDS:
+        return (long)c26_rtc_seconds();
     case C26_SYS_SEND: {
         int target = (int)(int64_t)a0;
         if (target < 0 || target >= C26_NPROC ||

@@ -90,7 +90,7 @@ FIRST_BOOT_MARKERS = [
 SECOND_BOOT_MARKERS = [
     # DEMO + HELLO.ASM + BOOT written by the guest, twelve cartridges
     # installed host-side, HI assembled on the machine.
-    "C26FS: mounted 16 file(s)",
+    "C26FS: mounted 23 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -161,6 +161,16 @@ SECOND_BOOT_MARKERS = [
     "EDIT PASTE 5",   # cart clip_get read what BASIC set ("PIECE")
     "EDIT COPY 5",    # cart clip_set wrote the current line
     "PASTE PIECE",    # BASIC read what EDIT copied
+    # The application suite (each a separately loaded toolkit cartridge).
+    "CALC CART ONLINE", "CALC = 81", "CALC CART EXIT",
+    "CLOCK CART ONLINE", "CLOCK CART EXIT",
+    "SHEET CART ONLINE", "SHEET TOTAL 12", "SHEET CART EXIT",
+    "ROBOT CART ONLINE", "ROBOT GET OK", "ROBOT CART EXIT",
+    "HEXEDIT CART ONLINE", "HEXEDIT CART EXIT",
+    # The RV64 disassembler decodes known words and the on-board-assembled HI.
+    "MONITOR SELFTEST", "addi x10, x0, 10", "add x10, x10, x11",
+    "MONITOR DISASM OK", "MONITOR CART EXIT",
+    "SNAKE CART ONLINE", "SNAKE CART EXIT",
     "92002",
     "SHUTTING DOWN - GOODBYE",
 ]
@@ -433,6 +443,26 @@ SECOND_BOOT_STAGES = [
     ('\x17', 2.0, 'EDIT COPY'),    # Ctrl-W: EDIT copies the line
     ('\x11', 2.0),                 # Ctrl-Q quits the editor
     ('\x14paste\n', 2.0, 'PASTE PIECE'),   # BASIC reads EDIT's clip
+    # The application suite: launch each new cartridge from the console, drive
+    # it a little, read a marker that proves it worked, and quit.
+    ('run "calc"\n', 4.0, 'CALC CART ONLINE'),
+    ('9*9=', 3.0, 'CALC = 81'),            # left-to-right arithmetic
+    ('q', 2.0, 'CALC CART EXIT'),
+    ('run "clock"\n', 4.0, 'CLOCK CART ONLINE'),  # wall clock via the RTC
+    ('q', 2.0, 'CLOCK CART EXIT'),
+    ('run "sheet"\n', 4.0, 'SHEET CART ONLINE'),
+    ('12\n', 3.0, 'SHEET TOTAL 12'),       # set A1=12, totals recompute
+    ('q', 2.0, 'SHEET CART EXIT'),
+    ('run "robot"\n', 4.0, 'ROBOT CART ONLINE'),
+    ('\x1e', 3.0, 'ROBOT GET OK'),         # right arrow writes+reads a channel
+    ('q', 2.0, 'ROBOT CART EXIT'),
+    ('run "hexedit"\n', 4.0, 'HEXEDIT CART ONLINE'),
+    ('q', 2.0, 'HEXEDIT CART EXIT'),
+    # MONITOR disassembles known words (self-test) and the machine-assembled HI.
+    ('run "monitor"\n', 4.0, 'add x10, x10, x11'),
+    ('q', 2.0, 'MONITOR CART EXIT'),
+    ('run "snake"\n', 4.0, 'SNAKE CART ONLINE'),
+    ('q', 3.0, 'SNAKE CART EXIT'),
     ('print 92000+2\nbye\n', 4.0, 'SHUTTING DOWN'),  # the machine powers off
 ]
 
@@ -565,7 +595,11 @@ def main() -> int:
                    "FILES=build/files.cart", "EDIT=build/edit.cart",
                    "TRACKER=build/tracker.cart",
                    "BREAKOUT=build/breakout.cart", "NET=build/net.cart",
-                   "ASM=build/asm.cart"])
+                   "ASM=build/asm.cart",
+                   "CALC=build/calc.cart", "CLOCK=build/clock.cart",
+                   "HEXEDIT=build/hexedit.cart", "SHEET=build/sheet.cart",
+                   "ROBOT=build/robot.cart", "SNAKE=build/snake.cart",
+                   "MONITOR=build/monitor.cart"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
@@ -629,7 +663,8 @@ def main() -> int:
           "IPC with resize/minimize/close window management, a graphical dock "
           "launching apps through synthetic pointer clicks, and a shared "
           "clipboard (copy/paste across apps), FILES/EDIT with "
-          "spawn, a real UDP round trip, a kernel TCP "
+          "spawn, an application suite (calc, clock, sheet, robot, hexedit, "
+          "snake) and an RV64 disassembler, a real UDP round trip, a kernel TCP "
           "client handshaking with a scripted host peer over guestfwd, DNS "
           "resolution, and a guest-initiated power-off")
     return 0

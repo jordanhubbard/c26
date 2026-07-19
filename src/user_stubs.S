@@ -57,12 +57,13 @@ STUB(stub_udp_send, C26_SYS_UDP_SEND)
 STUB(stub_udp_recv, C26_SYS_UDP_RECV)
 STUB(stub_clip_set, C26_SYS_CLIP_SET)
 STUB(stub_clip_get, C26_SYS_CLIP_GET)
+STUB(stub_rtc_seconds, C26_SYS_RTC_SECONDS)
 
     /* c26_api_t, field for field. */
     .align 3
     .globl c26_user_api
 c26_user_api:
-    .word 3                    /* version */
+    .word 4                    /* version */
     .word 0                    /* padding */
     .quad stub_puts
     .quad stub_putc
@@ -97,3 +98,4 @@ c26_user_api:
     .quad stub_udp_recv
     .quad stub_clip_set
     .quad stub_clip_get
+    .quad stub_rtc_seconds

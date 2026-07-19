@@ -108,6 +108,11 @@ typedef struct {
        crosses the app boundary. */
     int (*clip_set)(const void *data, size_t size);
     int (*clip_get)(void *data, size_t capacity);
+
+    /* --- version 4: real-time clock --- */
+
+    /* Wall-clock seconds since the Unix epoch, from the goldfish RTC. */
+    uint64_t (*rtc_seconds)(void);
 } c26_api_t;
 
 /* Arrow keys are delivered through getchar() as these codes. */
