@@ -206,6 +206,55 @@ static int match_word(parser_t *p, const char *word)
 }
 
 static int64_t parse_expr(parser_t *p);
+static int eval_string(parser_t *p, char *out, size_t cap);
+
+#define STR_MAX 128
+
+static size_t str_len(const char *s)
+{
+    size_t n = 0;
+    while (s[n] != '\0') n++;
+    return n;
+}
+
+static void format_int(int64_t value, char *out)
+{
+    char tmp[24];
+    int n = 0;
+    int negative = value < 0;
+    uint64_t u = negative ? (uint64_t)(-(value + 1)) + 1U : (uint64_t)value;
+    if (u == 0) tmp[n++] = '0';
+    while (u != 0) {
+        tmp[n++] = (char)('0' + (u % 10U));
+        u /= 10U;
+    }
+    int k = 0;
+    if (negative) out[k++] = '-';
+    while (n > 0) out[k++] = tmp[--n];
+    out[k] = '\0';
+}
+
+static int64_t parse_val(const char *s)
+{
+    while (*s == ' ') s++;
+    int negative = 0;
+    if (*s == '-') { negative = 1; s++; }
+    else if (*s == '+') s++;
+    int64_t v = 0;
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10 + (*s - '0');
+        s++;
+    }
+    return negative ? -v : v;
+}
+
+static void append_str(char *out, size_t cap, size_t *length, const char *s)
+{
+    while (*s != '\0') {
+        if (*length + 1 < cap) out[(*length)++] = *s;
+        s++;
+    }
+}
 
 static int64_t parse_factor(parser_t *p)
 {
@@ -258,6 +307,19 @@ static int64_t parse_factor(parser_t *p)
     }
     if (match_word(p, "FB")) {
         return fb_checksum();
+    }
+    /* String-argument functions returning a number: LEN, ASC, VAL. */
+    if (match_word(p, "LEN") || match_word(p, "ASC") || match_word(p, "VAL")) {
+        char kind = *(p->cursor - 1); /* N=LEN, C=ASC, L=VAL */
+        char s[STR_MAX];
+        if (!match_char(p, '(') || !eval_string(p, s, sizeof(s)) ||
+            !match_char(p, ')')) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        if (kind == 'N') return (int64_t)str_len(s);
+        if (kind == 'C') return (int64_t)(unsigned char)s[0];
+        return parse_val(s);
     }
     const char *cursor = c26_skip_spaces(p->cursor);
     if (*cursor >= '0' && *cursor <= '9') {
@@ -481,7 +543,11 @@ static int is_string_ref(const char *cursor)
 {
     cursor = c26_skip_spaces(cursor);
     if (*cursor == '"') return 1;
-    if (keyword(cursor, "TIME$")) return 1;
+    if (keyword(cursor, "TIME$") || keyword(cursor, "LEFT$") ||
+        keyword(cursor, "RIGHT$") || keyword(cursor, "MID$") ||
+        keyword(cursor, "CHR$") || keyword(cursor, "STR$")) {
+        return 1;
+    }
     return is_upper(*cursor) && cursor[1] == '$';
 }
 
@@ -502,44 +568,120 @@ static void format_time(char *out)
     out[8] = '\0';
 }
 
-/* Evaluates a string expression (literals and A$ joined by '+') into out. */
+/* One term of a string expression: a literal, TIME$, a string variable, or a
+   string-valued function (LEFT$/RIGHT$/MID$/CHR$/STR$). */
+static int eval_string_term(parser_t *p, char *out, size_t cap)
+{
+    const char *cursor = c26_skip_spaces(p->cursor);
+    size_t length = 0;
+    if (*cursor == '"') {
+        cursor++;
+        while (*cursor != '\0' && *cursor != '"') {
+            if (length + 1 < cap) out[length++] = *cursor;
+            cursor++;
+        }
+        if (*cursor != '"') {
+            set_error(p, "SYNTAX");
+            return 0;
+        }
+        p->cursor = cursor + 1;
+    } else if (keyword(cursor, "TIME$")) {
+        char clock[16];
+        format_time(clock);
+        append_str(out, cap, &length, clock);
+        p->cursor = cursor + 5;
+    } else if (keyword(cursor, "LEFT$") || keyword(cursor, "RIGHT$")) {
+        int left = cursor[0] == 'L';
+        p->cursor = cursor + (left ? 5 : 6);
+        char s[STR_MAX];
+        if (!match_char(p, '(') || !eval_string(p, s, sizeof(s)) ||
+            !match_char(p, ',')) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        int64_t n = parse_expr(p);
+        if (!match_char(p, ')') || p->error) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        size_t slen = str_len(s);
+        if (n < 0) n = 0;
+        if ((size_t)n > slen) n = (int64_t)slen;
+        size_t from = left ? 0 : slen - (size_t)n;
+        for (size_t i = 0; i < (size_t)n; i++) {
+            if (length + 1 < cap) out[length++] = s[from + i];
+        }
+    } else if (keyword(cursor, "MID$")) {
+        p->cursor = cursor + 4;
+        char s[STR_MAX];
+        if (!match_char(p, '(') || !eval_string(p, s, sizeof(s)) ||
+            !match_char(p, ',')) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        int64_t start = parse_expr(p); /* 1-based */
+        int64_t count = -1;
+        if (match_char(p, ',')) count = parse_expr(p);
+        if (!match_char(p, ')') || p->error) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        size_t slen = str_len(s);
+        if (start < 1) start = 1;
+        size_t from = (size_t)start - 1;
+        if (from > slen) from = slen;
+        size_t avail = slen - from;
+        size_t take = count < 0 ? avail : (size_t)count;
+        if (take > avail) take = avail;
+        for (size_t i = 0; i < take; i++) {
+            if (length + 1 < cap) out[length++] = s[from + i];
+        }
+    } else if (keyword(cursor, "CHR$")) {
+        p->cursor = cursor + 4;
+        if (!match_char(p, '(')) {
+            set_error(p, "SYNTAX");
+            return 0;
+        }
+        int64_t code = parse_expr(p);
+        if (!match_char(p, ')') || p->error) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        if (length + 1 < cap) out[length++] = (char)(code & 0xff);
+    } else if (keyword(cursor, "STR$")) {
+        p->cursor = cursor + 4;
+        if (!match_char(p, '(')) {
+            set_error(p, "SYNTAX");
+            return 0;
+        }
+        int64_t value = parse_expr(p);
+        if (!match_char(p, ')') || p->error) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        char num[24];
+        format_int(value, num);
+        append_str(out, cap, &length, num);
+    } else if (is_upper(*cursor) && cursor[1] == '$') {
+        append_str(out, cap, &length, strvars[*cursor - 'A']);
+        p->cursor = cursor + 2;
+    } else {
+        set_error(p, "SYNTAX");
+        return 0;
+    }
+    out[length] = '\0';
+    return 1;
+}
+
+/* A string expression: one or more terms joined by '+' concatenation. */
 static int eval_string(parser_t *p, char *out, size_t cap)
 {
     size_t length = 0;
     for (;;) {
-        const char *cursor = c26_skip_spaces(p->cursor);
-        if (*cursor == '"') {
-            cursor++;
-            while (*cursor != '\0' && *cursor != '"') {
-                if (length + 1 < cap) out[length++] = *cursor;
-                cursor++;
-            }
-            if (*cursor != '"') {
-                set_error(p, "SYNTAX");
-                return 0;
-            }
-            p->cursor = cursor + 1;
-        } else if (keyword(cursor, "TIME$")) {
-            char clock[16];
-            format_time(clock);
-            for (const char *c = clock; *c != '\0'; c++) {
-                if (length + 1 < cap) out[length++] = *c;
-            }
-            p->cursor = cursor + 5;
-        } else if (is_upper(*cursor) && cursor[1] == '$') {
-            const char *value = strvars[*cursor - 'A'];
-            while (*value != '\0') {
-                if (length + 1 < cap) out[length++] = *value;
-                value++;
-            }
-            p->cursor = cursor + 2;
-        } else {
-            set_error(p, "SYNTAX");
-            return 0;
-        }
-        if (!match_char(p, '+')) {
-            break;
-        }
+        char term[STR_MAX];
+        if (!eval_string_term(p, term, sizeof(term))) return 0;
+        append_str(out, cap, &length, term);
+        if (!match_char(p, '+')) break;
     }
     out[length] = '\0';
     return 1;

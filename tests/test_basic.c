@@ -222,6 +222,31 @@ int main(void)
     feed("run\n");
     expect("GOT WORLD\n", "string input");
 
+    /* String functions: LEN LEFT$ RIGHT$ MID$ CHR$ ASC VAL STR$. */
+    command("b$ = \"commodore\"");
+    command("print len(b$)");
+    expect("9\n", "LEN");
+    command("print left$(b$,4)");
+    expect("COMM\n", "LEFT$");
+    command("print right$(b$,4)");
+    expect("DORE\n", "RIGHT$");
+    command("print mid$(b$,3,3)");
+    expect("MMO\n", "MID$ with count");
+    command("print mid$(b$,7)");
+    expect("ORE\n", "MID$ to end");
+    command("print chr$(65)+chr$(66)+chr$(67)");
+    expect("ABC\n", "CHR$ + concat");
+    command("print asc(\"Z\")");
+    expect("90\n", "ASC");
+    command("print val(\"123\")+1");
+    expect("124\n", "VAL arithmetic");
+    command("print str$(42)+\"!\"");
+    expect("42!\n", "STR$ concat");
+    command("print len(left$(b$,3)+right$(b$,2))");
+    expect("5\n", "nested string funcs");
+    command("print val(str$(7*6))");
+    expect("42\n", "VAL of STR$ round-trip");
+
     /* Line editor: cursor movement, mid-line insert/delete, history. */
     command("print 3\x1f""12"); /* left once, insert before the 3 */
     expect("123\n", "insert before cursor");
