@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -356,6 +357,9 @@ def net_app_probe() -> None:
 # cartridge is running when it arrives. The second boot therefore feeds its
 # input in stages, sending \x03 only once SPIN is definitely running.
 SECOND_BOOT_STAGES = [
+    # Stages carry a completion marker where one exists (proceed as soon as it
+    # prints, capped at the delay); correctness-timing-sensitive or silent
+    # stages keep a plain fixed delay.
     (
         'load boot\n'
         'list\n'
@@ -368,19 +372,21 @@ SECOND_BOOT_STAGES = [
         'run "crash"\n'
         'print 111+222\n'
         'run "spin"\n',
-        30.0,
+        30.0, 'SPIN CART ONLINE',
     ),
-    ('\x03print 999-111\n', 8.0),
-    ('run "ticker"\n', 3.0),
-    ('\x14jobs\nprint 41000+1\n', 4.0),
-    ('kill 0\nprint 51000+1\n', 4.0),
-    ('print fb\nrun "pong"\n', 3.0),
-    ('\x14print fb\nrun "ping"\n', 4.0),
-    ('\x14kill 0\nprint 71000+1\n', 4.0),
+    ('\x03print 999-111\n', 8.0, '888'),
+    ('run "ticker"\n', 3.0, 'TICKER CART ONLINE'),
+    ('\x14jobs\nprint 41000+1\n', 4.0, '41001'),
+    ('kill 0\nprint 51000+1\n', 4.0, '51001'),
+    ('print fb\nrun "pong"\n', 3.0, 'PONG CART ONLINE'),
+    ('\x14print fb\nrun "ping"\n', 4.0, 'IPC ROUNDTRIP OK FROM JOB 0'),
+    ('\x14kill 0\nprint 71000+1\n', 4.0, '71001'),
     # Window management, scripted from BASIC so the affordances are gated
     # headlessly: a running cart's window resizes, minimizes, restores, and
     # closes — each mutating the composited framebuffer (WM checksums below).
-    ('run "pong"\n', 3.0),
+    # These keep fixed delays: the window ops are silent and the FB reads must
+    # follow a compositor flush.
+    ('run "pong"\n', 3.0, 'PONG CART ONLINE'),
     ('\x14print "WM";fb\n', 2.0),        # baseline: window floats over console
     ('window size 0,240,160\n', 2.0),
     ('print "WM";fb\n', 2.0),            # resized -> checksum changes
@@ -388,50 +394,57 @@ SECOND_BOOT_STAGES = [
     ('print "WM";fb\n', 2.0),            # minimized to the title bar
     ('window max 0\n', 2.0),
     ('print "WM";fb\n', 2.0),            # restored
-    ('window close 0\nprint 81000+1\n', 3.0),  # close kills the job
+    ('window close 0\nprint 81000+1\n', 3.0, '81001'),  # close kills the job
     (udp_echo_probe, 1.0),
-    ('run "net"\n', 3.0),
+    ('run "net"\n', 3.0, 'NET CART ONLINE'),
     (net_app_probe, 1.0),
     ('q', 2.0),
-    ('run "tracker"\n', 3.0),
+    ('run "tracker"\n', 3.0, 'TRACKER CART ONLINE'),
     (' ', 1.5),                # play the pattern for a beat
     ('q', 2.0),
-    ('run "breakout"\n', 3.0),
+    ('run "breakout"\n', 3.0, 'BREAKOUT CART ONLINE'),
     ('q', 2.0),
-    ('run asm\n', 3.0),
-    ('hello.asm hi\n', 3.0),   # assemble the seeded source into a cartridge
+    ('run asm\n', 3.0, 'ASM CART ONLINE'),
+    ('hello.asm hi\n', 3.0, 'ASSEMBLED HELLO.ASM'),  # assemble on the machine
     ('q', 2.0),
-    ('run hi\n', 3.0),         # run the machine-assembled cartridge
-    ('run pong\n', 2.0),
-    ('\x14send 0,"PING"\n', 3.0),  # script a running job from BASIC
+    ('run hi\n', 3.0, 'HELLO FROM SELF-HOSTED CODE'),  # run the assembled cart
+    ('run pong\n', 2.0, 'PONG CART ONLINE'),
+    ('\x14send 0,"PING"\n', 3.0, 'PONG GOT PING'),  # script a running job
     ('kill 0\n', 2.0),
-    ('run "edit"\n', 3.0),
-    ('SMOKE NOTE\x13', 2.0),   # type into EDIT, Ctrl-S saves
+    ('run "edit"\n', 3.0, 'EDIT CART ONLINE'),
+    ('SMOKE NOTE\x13', 2.0, 'SAVED NOTES'),   # type into EDIT, Ctrl-S saves
     ('\x11', 2.0),             # Ctrl-Q quits the editor
-    ('dir\nrun "files"\n', 3.0),
+    ('dir\nrun "files"\n', 3.0, 'FILES CART ONLINE'),
     ('r', 2.0),                # R on the first entry (DEMO): spawn error path
     ('q', 2.0),                # quit FILES
     # Graphical dock: list the launcher tiles built from C26FS, then click the
     # PAINT tile through the real pointer hit-test path to launch it.
-    ('dock\n', 2.0),
-    ('click 46,940\n', 3.0),   # the PAINT tile's reported centre
+    ('dock\n', 2.0, 'DOCK PAINT'),
+    ('click 46,940\n', 3.0, 'PAINT CART ONLINE'),   # the PAINT tile's centre
     ('\x14kill 0\n', 2.0),     # refocus console and dismiss the launched app
     # Shared clipboard: a BASIC round-trip, then copy/paste crossing the app
     # boundary in both directions — BASIC sets the clipboard and EDIT pastes
     # it (Ctrl-Y, clip_get syscall), then EDIT copies a line (Ctrl-W,
     # clip_set syscall) and BASIC pastes what the app copied.
-    ('clip "COPYME"\n', 2.0),
-    ('paste\n', 2.0),              # PASTE COPYME (BASIC set -> BASIC get)
-    ('delete notes\nclip "PIECE"\nrun "edit"\n', 3.0),
-    ('\x19', 2.0),                 # Ctrl-Y: EDIT reads BASIC's clip -> EDIT PASTE 5
-    ('\x17', 2.0),                 # Ctrl-W: EDIT copies the line -> EDIT COPY 5
+    ('clip "COPYME"\n', 2.0, 'CLIP SET 6'),
+    ('paste\n', 2.0, 'PASTE COPYME'),              # BASIC set -> BASIC get
+    ('delete notes\nclip "PIECE"\nrun "edit"\n', 3.0, 'EDIT CART ONLINE'),
+    ('\x19', 2.0, 'EDIT PASTE'),   # Ctrl-Y: EDIT reads BASIC's clip
+    ('\x17', 2.0, 'EDIT COPY'),    # Ctrl-W: EDIT copies the line
     ('\x11', 2.0),                 # Ctrl-Q quits the editor
-    ('\x14paste\n', 2.0),          # PASTE PIECE (BASIC reads EDIT's clip)
-    ('print 92000+2\nbye\n', 4.0),  # the machine powers itself off
+    ('\x14paste\n', 2.0, 'PASTE PIECE'),   # BASIC reads EDIT's clip
+    ('print 92000+2\nbye\n', 4.0, 'SHUTTING DOWN'),  # the machine powers off
 ]
 
 
 def boot_staged(stages) -> str:
+    """Drive the guest one stage at a time. A stage is (action, delay) or
+    (action, delay, marker): with a marker, proceed as soon as that string
+    appears in new output (falling back to the full delay as a timeout);
+    without one, wait the fixed delay. Marker-driven stages cut the slack a
+    fixed sleep leaves while staying reliable — a stage never proceeds before
+    its own completion output, which pure idle-detection could not guarantee
+    for silent-then-print work (graphics, a demo)."""
     process = subprocess.Popen(
         qemu_command(),
         cwd=str(ROOT),
@@ -440,20 +453,57 @@ def boot_staged(stages) -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
+    chunks: list[str] = []
+    lock = threading.Lock()
+
+    def reader() -> None:
+        try:
+            for line in iter(process.stdout.readline, ""):
+                with lock:
+                    chunks.append(line)
+        except (ValueError, OSError):
+            pass
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+
+    def text_from(index: int) -> str:
+        with lock:
+            return "".join(chunks[index:])
+
+    def mark() -> int:
+        with lock:
+            return len(chunks)
+
+    def wait_for(marker: str, cap: float, start: int) -> None:
+        deadline = time.time() + cap
+        while time.time() < deadline:
+            if marker in text_from(start):
+                time.sleep(0.15)  # let the rest of the line settle
+                return
+            time.sleep(0.05)
+
     try:
-        for action, delay in stages:
+        for stage in stages:
+            action, delay = stage[0], stage[1]
+            marker = stage[2] if len(stage) > 2 else None
+            start = mark()
             if callable(action):
                 action()
             else:
                 process.stdin.write(action)
                 process.stdin.flush()
-            time.sleep(delay)
+            if marker is not None:
+                wait_for(marker, delay, start)
+            else:
+                time.sleep(delay)
     except BrokenPipeError:
         pass
     process.kill()
-    output = process.stdout.read() if process.stdout else ""
+    thread.join(timeout=1.0)
     process.wait()
-    return output
+    with lock:
+        return "".join(chunks)
 
 
 def require_markers(output: str, markers: list[str], boot_name: str) -> bool:

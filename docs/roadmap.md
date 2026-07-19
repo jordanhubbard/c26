@@ -204,6 +204,24 @@ assertions in `tests/test_basic.c` (the real interpreter driven through
   order; `READ` pulls the next items into scalar, string, or array variables
   (`OUT OF DATA` at the end); `RESTORE` rewinds to the start or to a line.
 
+## Delivered: faster smoke gate, and C26FS stays flat (2026-07-19)
+
+`scripts/smoke.py`'s staged second boot now paces on the guest's own output:
+each stage may carry a completion marker and proceeds as soon as it prints
+(capped by the old delay as a timeout) instead of always sleeping the full
+interval. Silent or FB-flush-timing-sensitive stages keep a fixed delay. A
+pure idle-detection version was tried and rejected — it raced ahead of
+silent-then-print work (graphics, the self demo) — so the marker approach is
+the one that stays reliable. Result: the smoke runs in ~106s (was ~3 min),
+green across repeated runs.
+
+C26FS subdirectories were considered and **deliberately declined**: a flat
+64-file store with first-fit extents is something one person can read in a
+sitting (`src/fs.c`), and paths/directory nodes/traversal would add real
+complexity for little benefit at this scale. Keeping the filesystem flat is
+the honest choice, consistent with the legibility principle; it can be
+revisited if the file count ever outgrows a flat namespace.
+
 ## Delivered: continuous integration (2026-07-19)
 
 `.github/workflows/ci.yml` runs the single gate — `make check` (host unit
