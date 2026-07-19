@@ -247,6 +247,46 @@ int main(void)
     command("print val(str$(7*6))");
     expect("42\n", "VAL of STR$ round-trip");
 
+    /* Arrays (DIM) and user functions (DEF FN). */
+    command("dim q(5)");
+    command("q(2) = 99");
+    command("print q(2)");
+    expect("99\n", "array store/load");
+    command("q(2) = q(2) + 1");
+    command("print q(2)");
+    expect("100\n", "array read-modify-write");
+    command("print q(0)");
+    expect("0\n", "array zero-initialized");
+    command("print q(9)");
+    expect("?BAD SUBSCRIPT ERROR", "array bounds check");
+    command("print z(3)");            /* undimensioned auto-dims to 0..10 */
+    expect("0\n", "array auto-dim");
+    command("def fn d(x) = x*2+1");
+    command("print fn d(10)");
+    expect("21\n", "DEF FN call");
+    command("print fn d(0)");
+    expect("1\n", "DEF FN zero arg");
+    command("print fn e(1)");
+    expect("?UNDEF'D FUNCTION ERROR", "undefined function");
+
+    /* Arrays and functions inside a program, and clean re-run. */
+    command("new");
+    command("10 dim m(4)");
+    command("20 for i=0 to 4");
+    command("30 m(i) = i*i");
+    command("40 next");
+    command("50 print m(3)");
+    command("60 def fn t(n) = n*n+1");
+    command("70 print fn t(m(2))");
+    shim_output_reset();
+    feed("run\n");
+    expect("9\n", "array filled in a loop");
+    expect("17\n", "DEF FN of an array element");
+    shim_output_reset();
+    feed("run\n");
+    expect("9\n", "array survives re-run");
+    expect_absent("REDIM", "re-run does not redim-error");
+
     /* Line editor: cursor movement, mid-line insert/delete, history. */
     command("print 3\x1f""12"); /* left once, insert before the 3 */
     expect("123\n", "insert before cursor");

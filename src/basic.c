@@ -45,6 +45,16 @@ typedef struct {
 
 static int64_t vars[26];
 static char strvars[26][64];
+
+/* Numeric arrays A()..Z() from a shared bump pool, and single-parameter
+   user functions DEF FN A(x)=expr stored as source to re-parse on call. */
+#define ARRAY_POOL 2048
+static int array_len[26];  /* element count, 0 = not dimensioned */
+static int array_off[26];  /* base offset into array_pool */
+static int64_t array_pool[ARRAY_POOL];
+static int array_pool_used;
+static char fn_body[26][80];
+static int fn_param[26];    /* parameter variable index, -1 = undefined */
 static char input_line[96];
 static size_t input_length;
 static size_t input_cursor;
@@ -256,6 +266,47 @@ static void append_str(char *out, size_t cap, size_t *length, const char *s)
     }
 }
 
+/* Arrays and DEF FN reset on NEW and at the start of every RUN, so a program
+   that dimensions or defines re-runs cleanly (scalar vars persist as before). */
+static void reset_arrays_fns(void)
+{
+    for (int i = 0; i < 26; i++) {
+        array_len[i] = 0;
+        fn_param[i] = -1;
+    }
+    array_pool_used = 0;
+}
+
+/* Allocate `elements` slots (zeroed) for array `idx`. Returns 0 if already
+   dimensioned or the pool is exhausted. */
+static int array_alloc(int idx, int elements)
+{
+    if (array_len[idx] != 0 || elements < 1 ||
+        array_pool_used + elements > ARRAY_POOL) {
+        return 0;
+    }
+    array_off[idx] = array_pool_used;
+    array_len[idx] = elements;
+    for (int i = 0; i < elements; i++) array_pool[array_off[idx] + i] = 0;
+    array_pool_used += elements;
+    return 1;
+}
+
+/* Resolve A(index) to a storage slot, auto-dimensioning to 0..10 on first use
+   (classic BASIC). Returns 0 and sets *error on a bad subscript / exhaustion. */
+static int64_t *array_slot(int idx, int64_t index, const char **error)
+{
+    if (array_len[idx] == 0 && !array_alloc(idx, 11)) {
+        *error = "OUT OF MEMORY";
+        return 0;
+    }
+    if (index < 0 || index >= array_len[idx]) {
+        *error = "BAD SUBSCRIPT";
+        return 0;
+    }
+    return &array_pool[array_off[idx] + (int)index];
+}
+
 static int64_t parse_factor(parser_t *p)
 {
     if (p->error != 0) {
@@ -321,6 +372,45 @@ static int64_t parse_factor(parser_t *p)
         if (kind == 'C') return (int64_t)(unsigned char)s[0];
         return parse_val(s);
     }
+    /* FN A(arg): evaluate a user function's stored body with its parameter
+       bound to arg, then restore the parameter variable. */
+    {
+        const char *fn = c26_skip_spaces(p->cursor);
+        if (fn[0] == 'F' && fn[1] == 'N') {
+            const char *name = c26_skip_spaces(fn + 2);
+            if (is_upper(*name)) {
+                int idx = *name - 'A';
+                p->cursor = name + 1;
+                if (!match_char(p, '(')) {
+                    set_error(p, "SYNTAX");
+                    return 0;
+                }
+                int64_t arg = parse_expr(p);
+                if (!match_char(p, ')')) {
+                    set_error(p, "SYNTAX");
+                    return 0;
+                }
+                if (p->error) return 0;
+                if (fn_param[idx] < 0) {
+                    set_error(p, "UNDEF'D FUNCTION");
+                    return 0;
+                }
+                int pv = fn_param[idx];
+                int64_t saved = vars[pv];
+                vars[pv] = arg;
+                parser_t q;
+                q.cursor = fn_body[idx];
+                q.error = 0;
+                int64_t result = parse_expr(&q);
+                vars[pv] = saved;
+                if (q.error) {
+                    set_error(p, q.error);
+                    return 0;
+                }
+                return result;
+            }
+        }
+    }
     const char *cursor = c26_skip_spaces(p->cursor);
     if (*cursor >= '0' && *cursor <= '9') {
         uint64_t value = 0;
@@ -330,6 +420,27 @@ static int64_t parse_factor(parser_t *p)
         }
         p->cursor = cursor;
         return (int64_t)value;
+    }
+    /* Array element A(index) — before the scalar variable rule. */
+    if (is_upper(*cursor) && cursor[1] == '(') {
+        int idx = *cursor - 'A';
+        p->cursor = cursor + 1;
+        if (!match_char(p, '(')) {
+            set_error(p, "SYNTAX");
+            return 0;
+        }
+        int64_t index = parse_expr(p);
+        if (!match_char(p, ')') || p->error) {
+            set_error(p, p->error ? p->error : "SYNTAX");
+            return 0;
+        }
+        const char *err = 0;
+        int64_t *slot = array_slot(idx, index, &err);
+        if (slot == 0) {
+            set_error(p, err);
+            return 0;
+        }
+        return *slot;
     }
     if (is_upper(*cursor) && !is_upper(cursor[1])) {
         p->cursor = cursor + 1;
@@ -752,6 +863,25 @@ static exec_t exec_assign(parser_t *p)
         strvars[index][i] = '\0';
         return ok_next();
     }
+    if (cursor[1] == '(') { /* array element assignment: A(i) = <expr> */
+        int idx = *cursor - 'A';
+        p->cursor = cursor + 1;
+        if (!match_char(p, '(')) return fail("SYNTAX");
+        int64_t subscript = parse_expr(p);
+        if (p->error != 0 || !match_char(p, ')')) {
+            return fail(p->error != 0 ? p->error : "SYNTAX");
+        }
+        if (!match_char(p, '=')) return fail("SYNTAX");
+        int64_t value = parse_expr(p);
+        if (p->error != 0 || !parse_end(p)) {
+            return fail(p->error != 0 ? p->error : "SYNTAX");
+        }
+        const char *err = 0;
+        int64_t *slot = array_slot(idx, subscript, &err);
+        if (slot == 0) return fail(err);
+        *slot = value;
+        return ok_next();
+    }
     if (is_upper(cursor[1])) {
         return fail("SYNTAX");
     }
@@ -765,6 +895,54 @@ static exec_t exec_assign(parser_t *p)
         return fail(p->error != 0 ? p->error : "SYNTAX");
     }
     vars[index] = value;
+    return ok_next();
+}
+
+/* DIM A(n)[,B(m)...] — dimension one or more arrays to indices 0..n. */
+static exec_t exec_dim(parser_t *p)
+{
+    for (;;) {
+        const char *cursor = c26_skip_spaces(p->cursor);
+        if (!is_upper(*cursor) || cursor[1] != '(') return fail("SYNTAX");
+        int idx = *cursor - 'A';
+        p->cursor = cursor + 1;
+        if (!match_char(p, '(')) return fail("SYNTAX");
+        int64_t n = parse_expr(p);
+        if (p->error != 0 || !match_char(p, ')')) {
+            return fail(p->error != 0 ? p->error : "SYNTAX");
+        }
+        if (n < 0) return fail("ILLEGAL QUANTITY");
+        if (array_len[idx] != 0) return fail("REDIM'D ARRAY");
+        if (!array_alloc(idx, (int)n + 1)) return fail("OUT OF MEMORY");
+        if (!match_char(p, ',')) break;
+    }
+    if (!parse_end(p)) return fail("SYNTAX");
+    return ok_next();
+}
+
+/* DEF FN A(x) = <expr> — store the body source to re-parse on each call. */
+static exec_t exec_def(parser_t *p)
+{
+    const char *cursor = c26_skip_spaces(p->cursor);
+    if (cursor[0] != 'F' || cursor[1] != 'N') return fail("SYNTAX");
+    cursor = c26_skip_spaces(cursor + 2);
+    if (!is_upper(*cursor)) return fail("SYNTAX");
+    int idx = *cursor - 'A';
+    p->cursor = cursor + 1;
+    if (!match_char(p, '(')) return fail("SYNTAX");
+    const char *param = c26_skip_spaces(p->cursor);
+    if (!is_upper(*param)) return fail("SYNTAX");
+    int pv = *param - 'A';
+    p->cursor = param + 1;
+    if (!match_char(p, ')') || !match_char(p, '=')) return fail("SYNTAX");
+    const char *body = c26_skip_spaces(p->cursor);
+    int i = 0;
+    while (body[i] != '\0' && i + 1 < (int)sizeof(fn_body[0])) {
+        fn_body[idx][i] = body[i];
+        i++;
+    }
+    fn_body[idx][i] = '\0';
+    fn_param[idx] = pv;
     return ok_next();
 }
 
@@ -1622,6 +1800,14 @@ static exec_t exec_statement(const char *text, long pc)
         c26_putc('\n');
         return ok_next();
     }
+    if (keyword(line, "DIM")) {
+        p.cursor = line + 3;
+        return exec_dim(&p);
+    }
+    if (keyword(line, "DEF")) {
+        p.cursor = line + 3;
+        return exec_def(&p);
+    }
     if (keyword(line, "LET")) {
         p.cursor = line + 3;
         return exec_assign(&p);
@@ -1642,6 +1828,7 @@ static void run_program(void)
     break_flag = 0;
     for_depth = 0;
     gosub_depth = 0;
+    reset_arrays_fns();
     size_t pc = 0;
     const char *error = 0;
     uint16_t error_line = 0;
@@ -1902,6 +2089,7 @@ static void process_line(const char *line)
             vars[i] = 0;
             strvars[i][0] = '\0';
         }
+        reset_arrays_fns();
         c26_puts("NEW PROGRAM\n");
         c26_desktop_invalidate();
         return;
@@ -2198,6 +2386,7 @@ void c26_basic_init(void)
     c26_puts("C26 BASIC V3.0 - EXPRESSIONS, CONTROL FLOW, HARDWARE STATEMENTS\n");
     c26_puts("TYPE HELP FOR COMMANDS, BYE TO POWER OFF, ESC FOR THE DESKTOP\n");
     program_count = 0;
+    reset_arrays_fns();
     rng_state = c26_interrupt_ticks() * 6364136223846793005ULL + 1;
     if (c26_fs_online()) {
         size_t size = 0;
