@@ -1,0 +1,40 @@
+name: CI
+
+# The single gate — `make check` (host unit tests + a two-boot QEMU smoke)
+# runs on every push and pull request, so the honesty rule ("every capability
+# is machine-checked headlessly") is enforced automatically, not by hand.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the freestanding toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm qemu-system-misc python3 make
+          # The Makefile falls back to PATH clang / llvm-objcopy when Homebrew
+          # LLVM is absent, which is exactly the CI runner's situation.
+
+      - name: Tool versions
+        run: |
+          clang --version
+          llvm-objcopy --version
+          qemu-system-riscv64 --version
+          python3 --version
+
+      - name: make check
+        run: make check
