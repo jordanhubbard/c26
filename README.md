@@ -63,7 +63,10 @@ host operating system.
   a scrolling 100x45 text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with
   keyboard selection, mouse pointer, and BASIC, file-browser, robot, network,
-  and device applications.
+  and device applications. A persistent graphical dock along the screen bottom
+  shows a tile per installed cartridge (scanned from C26FS at boot); clicking a
+  tile launches the app. BASIC `CLICK x,y`/`DRAG` drive a synthetic pointer, so
+  the window manager and dock are scriptable and headlessly testable.
 - C26 BASIC V3: signed 64-bit expressions with precedence, parentheses,
   comparisons, `AND`/`OR`/`NOT`/`MOD`; `IF...THEN`, `GOTO`, `GOSUB`/`RETURN`,
   `FOR`/`NEXT`/`STEP`, `END`, `REM`; `INPUT`, `GET`, `PAUSE`; functions

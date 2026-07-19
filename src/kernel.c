@@ -12,6 +12,7 @@ void kmain(void)
     c26_interrupts_init();
     c26_block_init();
     c26_fs_init();
+    c26_dock_rebuild();
     c26_net_init();
     c26_desktop_init();
     c26_graphics_demo();

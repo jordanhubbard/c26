@@ -14,6 +14,7 @@ size_t c26_fs_count(void);
 int c26_fs_entry(size_t index, const char **name, uint32_t *size);
 int c26_fs_save(const char *name, const void *data, size_t size);
 int c26_fs_load(const char *name, void *data, size_t capacity, size_t *size);
+int c26_fs_peek(const char *name, void *data, size_t n);
 int c26_fs_delete(const char *name);
 int c26_fs_rename(const char *old_name, const char *new_name);
 

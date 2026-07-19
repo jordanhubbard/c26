@@ -51,6 +51,10 @@ int c26_cart_resize_window(int job, int w, int h);
 int c26_cart_set_minimized(int job, int minimized);
 int c26_cart_focus(int job);
 
+/* The dock: a launcher bar of app tiles, rebuilt from C26FS at boot. */
+void c26_dock_rebuild(void);
+void c26_dock_print(void);
+
 /* The system clipboard: one shared text buffer for copy/paste across apps. */
 void c26_clipboard_set(const char *data, unsigned int len);
 unsigned int c26_clipboard_get(char *buf, unsigned int cap);
@@ -63,6 +67,10 @@ void c26_compositor_flush(void);
 void c26_compositor_mark_dirty(void);
 int c26_wm_click(int x, int y, int pressed);
 void c26_wm_pointer_moved(int x, int y);
+
+/* Synthetic pointer input (BASIC CLICK/DRAG; the smoke gate drives the WM). */
+void c26_desktop_inject_pointer(int x, int y);
+void c26_desktop_inject_button(int pressed);
 void c26_desktop_draw_pointer(void);
 void c26_graphics_demo(void);
 void c26_audio_demo(void);

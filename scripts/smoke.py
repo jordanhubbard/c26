@@ -148,6 +148,9 @@ SECOND_BOOT_MARKERS = [
     "FILES CART ONLINE",
     "FILES SEES",
     "Error: not a c26 cartridge",
+    # Graphical dock: tiles enumerated from C26FS with click geometry, and a
+    # dock click launches PAINT through the pointer hit-test path.
+    "DOCK PAINT 46 940",
     # Shared clipboard, both directions across the app boundary.
     "PASTE COPYME",   # BASIC round-trip through the kernel clipboard
     "EDIT PASTE 5",   # cart clip_get read what BASIC set ("PIECE")
@@ -393,6 +396,11 @@ SECOND_BOOT_STAGES = [
     ('dir\nrun "files"\n', 3.0),
     ('r', 2.0),                # R on the first entry (DEMO): spawn error path
     ('q', 2.0),                # quit FILES
+    # Graphical dock: list the launcher tiles built from C26FS, then click the
+    # PAINT tile through the real pointer hit-test path to launch it.
+    ('dock\n', 2.0),
+    ('click 46,940\n', 3.0),   # the PAINT tile's reported centre
+    ('\x14kill 0\n', 2.0),     # refocus console and dismiss the launched app
     # Shared clipboard: a BASIC round-trip, then copy/paste crossing the app
     # boundary in both directions — BASIC sets the clipboard and EDIT pastes
     # it (Ctrl-Y, clip_get syscall), then EDIT copies a line (Ctrl-W,
@@ -531,6 +539,13 @@ def main() -> int:
         sys.stderr.write(f"\na window op did not change the framebuffer: "
                          f"{wm_sums}\n")
         return 1
+    # Dock proof: PAINT was launched twice — once by RUN, once by the dock
+    # click — so the dock's pointer hit-test genuinely started the app.
+    if second_output.count("CART START PAINT") < 2:
+        sys.stderr.write(second_output)
+        sys.stderr.write("\ndock click did not launch PAINT via the "
+                         "pointer hit-test path\n")
+        return 1
     # Networking proof: a real UDP datagram went from the host through
     # QEMU's user network into the guest stack and came back.
     if udp_echo_reply != b"C26-NET-PING":
@@ -546,7 +561,8 @@ def main() -> int:
           "higher-order DEMO.SCM driving the desktop), graphics, sound, "
           "C26FS v2, two-boot persistence, multiprocessing U-mode cartridges "
           "(contained fault, preemptive kill, concurrent job), windows + "
-          "IPC with resize/minimize/close window management and a shared "
+          "IPC with resize/minimize/close window management, a graphical dock "
+          "launching apps through synthetic pointer clicks, and a shared "
           "clipboard (copy/paste across apps), FILES/EDIT with "
           "spawn, a real UDP round trip, a kernel TCP "
           "client handshaking with a scripted host peer over guestfwd, DNS "

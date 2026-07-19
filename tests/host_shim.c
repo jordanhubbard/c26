@@ -164,6 +164,10 @@ unsigned int c26_clipboard_get(char *b, unsigned int cap)
     return n;
 }
 unsigned int c26_clipboard_length(void) { return shim_clip_len; }
+void c26_desktop_inject_pointer(int x, int y) { (void)x; (void)y; }
+void c26_desktop_inject_button(int pressed) { (void)pressed; }
+void c26_dock_rebuild(void) {}
+void c26_dock_print(void) { c26_puts("DOCK EMPTY\n"); }
 int c26_cart_focus(int j) { (void)j; return 0; }
 int c26_cart_send(int j, const void *d, size_t s) { (void)j;(void)d;(void)s; return 0; }
 void c26_cart_list_jobs(void) { c26_puts("  (NO JOBS)\n"); }

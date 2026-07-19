@@ -348,6 +348,21 @@ int c26_fs_save(const char *name, const void *data, size_t size)
     return write_metadata();
 }
 
+/* Read up to `n` bytes from the start of a file without needing a buffer for
+   the whole thing — enough for a header/magic probe (e.g. the dock deciding
+   which files are cartridges). Returns the byte count copied, or 0. */
+int c26_fs_peek(const char *name, void *data, size_t n)
+{
+    if (!mounted || data == 0 || n == 0) return 0;
+    fs_entry_t *entry = find_entry(name);
+    if (entry == 0 || entry->size == 0) return 0;
+    if (!c26_block_read(entry->start_sector, sector_buffer)) return 0;
+    size_t chunk = n < C26_BLOCK_SECTOR_SIZE ? n : C26_BLOCK_SECTOR_SIZE;
+    if (chunk > entry->size) chunk = entry->size;
+    memcpy(data, sector_buffer, chunk);
+    return (int)chunk;
+}
+
 int c26_fs_load(const char *name, void *data, size_t capacity, size_t *size)
 {
     if (!mounted || data == 0) return 0;

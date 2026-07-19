@@ -342,6 +342,32 @@ void c26_desktop_mouse(int *x, int *y, int *buttons)
     if (buttons != 0) *buttons = pointer_buttons;
 }
 
+/* Synthetic pointer input: move the pointer to an absolute position and route
+   it exactly as a real virtio-mouse move would. Lets BASIC (and the smoke
+   gate) drive the window manager and dock through the actual hit-test path. */
+void c26_desktop_inject_pointer(int x, int y)
+{
+    if (x < 0) x = 0;
+    if (x >= (int)C26_SCREEN_WIDTH) x = (int)C26_SCREEN_WIDTH - 1;
+    if (y < 0) y = 0;
+    if (y >= (int)C26_SCREEN_HEIGHT) y = (int)C26_SCREEN_HEIGHT - 1;
+    pointer_x = x;
+    pointer_y = y;
+    if (c26_screen_mode() != C26_SCREEN_DESKTOP) {
+        c26_wm_pointer_moved(pointer_x, pointer_y);
+    }
+    redraw_requested = 1;
+}
+
+/* Synthetic left-button press (1) or release (0) at the current pointer. */
+void c26_desktop_inject_button(int pressed)
+{
+    c26_input_event_t event = {C26_INPUT_EVENT_KEY, BTN_LEFT,
+                               pressed ? 1 : 0};
+    handle_input_event(event);
+    redraw_requested = 1;
+}
+
 void c26_io_pump(void)
 {
     int ch;

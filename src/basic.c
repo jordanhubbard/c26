@@ -1427,6 +1427,34 @@ static exec_t exec_statement(const char *text, long pc)
         }
         return ok_next();
     }
+    if (keyword(line, "DOCK")) {
+        c26_dock_rebuild();
+        c26_dock_print();
+        return ok_next();
+    }
+    if (keyword(line, "CLICK")) {
+        p.cursor = line + 5;
+        int64_t v[2];
+        if (parse_arguments(&p, v, 2, 2) < 0) {
+            return fail(p.error != 0 ? p.error : "SYNTAX");
+        }
+        c26_desktop_inject_pointer((int)v[0], (int)v[1]);
+        c26_desktop_inject_button(1);
+        c26_desktop_inject_button(0);
+        return ok_next();
+    }
+    if (keyword(line, "DRAG")) {
+        p.cursor = line + 4;
+        int64_t v[4];
+        if (parse_arguments(&p, v, 4, 4) < 0) {
+            return fail(p.error != 0 ? p.error : "SYNTAX");
+        }
+        c26_desktop_inject_pointer((int)v[0], (int)v[1]);
+        c26_desktop_inject_button(1);
+        c26_desktop_inject_pointer((int)v[2], (int)v[3]);
+        c26_desktop_inject_button(0);
+        return ok_next();
+    }
     if (keyword(line, "CLIP")) {
         const char *cursor = c26_skip_spaces(line + 4);
         if (*cursor != '"') return fail("SYNTAX");
@@ -1821,6 +1849,7 @@ static void process_line(const char *line)
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
         c26_puts("DESKTOP: WINDOW J,X,Y | SIZE J,W,H | MIN/MAX J | CLOSE J  FOCUS J  SEND J,\"MSG\"\n");
         c26_puts("CLIP \"TEXT\"  PASTE   (shared clipboard, also Ctrl-W/Ctrl-Y in EDIT)\n");
+        c26_puts("DOCK  CLICK X,Y  DRAG X1,Y1,X2,Y2   (launcher + synthetic pointer)\n");
         c26_puts("LIST EDIT RUN NEW DIR SAVE LOAD DELETE RENAME RUN NAME JOBS KILL BYE HELP\n");
         c26_puts("STRINGS: A$=\"TEXT\"  PRINT A$  INPUT A$  IF A$=\"X\" THEN\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB TIME  STRINGS: TIME$\n");

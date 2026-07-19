@@ -167,6 +167,24 @@ BASIC round-trip, then EDIT pasting what BASIC copied (`clip_get` reads the
 5-byte "PIECE"), then EDIT copying a line that BASIC's `PASTE` reads back
 (`clip_set`). The stub page stayed within its single 4 KiB page.
 
+## Delivered: a graphical dock + synthetic pointer input (2026-07-19)
+
+Apps used to start only by name (`RUN NAME`). A persistent dock now runs along
+the screen bottom: the compositor (`src/cart.c`) rebuilds it from C26FS at
+boot, making a tile for every file that is a real cartridge (magic-header
+probe via the new `c26_fs_peek`), and a pointer click on a tile launches that
+app through the ordinary window-manager hit test.
+
+To gate a mouse affordance under the headless rule, the desktop gained
+synthetic pointer input (`c26_desktop_inject_pointer` / `_button`), surfaced as
+BASIC `CLICK x,y` and `DRAG x1,y1,x2,y2`, which flow through the exact path a
+real virtio-mouse event takes. This also lets the smoke gate exercise the
+window affordances by *clicking* them, not just scripting them: `BASIC DOCK`
+prints each tile's centre so a click can land on it precisely, then the gate
+clicks PAINT's tile and confirms it launched (a second `CART START PAINT`
+beyond the one from `RUN`). With this, every windowing capability — move,
+resize, minimize, close, and launch — is driven through the real pointer code.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,

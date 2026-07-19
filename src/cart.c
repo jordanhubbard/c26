@@ -116,6 +116,93 @@ unsigned int c26_clipboard_get(char *buf, unsigned int cap)
 
 unsigned int c26_clipboard_length(void) { return clipboard_len; }
 
+/* The dock: a persistent launcher bar of app tiles along the screen bottom,
+   rebuilt from C26FS at boot. A click on a tile launches that cartridge. */
+#define DOCK_H 40
+#define DOCK_PAD 8
+#define DOCK_GAP 6
+#define DOCK_MAX 16
+typedef struct {
+    char name[C26_FS_NAME_MAX + 1];
+    int x;
+    int w;
+} dock_tile_t;
+static dock_tile_t dock[DOCK_MAX];
+static int dock_count;
+
+static int dock_top(void) { return (int)C26_SCREEN_HEIGHT - DOCK_H; }
+
+/* Scan C26FS and make a tile for every file that is a real cartridge (magic
+   header), so the dock always reflects the launchable apps present at boot. */
+void c26_dock_rebuild(void)
+{
+    dock_count = 0;
+    int x = DOCK_PAD;
+    size_t total = c26_fs_count();
+    for (size_t i = 0; i < total && dock_count < DOCK_MAX; i++) {
+        const char *name;
+        uint32_t size;
+        if (!c26_fs_entry(i, &name, &size)) continue;
+        c26_cart_header_t header;
+        if (c26_fs_peek(name, &header, sizeof(header)) < (int)sizeof(header)) {
+            continue;
+        }
+        if (header.magic != C26_CART_MAGIC) continue;
+        dock_tile_t *tile = &dock[dock_count++];
+        int len = 0;
+        while (name[len] != '\0' && len < (int)C26_FS_NAME_MAX) {
+            tile->name[len] = name[len];
+            len++;
+        }
+        tile->name[len] = '\0';
+        tile->w = len * 12 + 16;
+        tile->x = x;
+        x += tile->w + DOCK_GAP;
+    }
+}
+
+/* Report each tile's centre as "DOCK <name> <x> <y>" so a scripted click
+   (the smoke gate) can land on it without guessing the layout. */
+void c26_dock_print(void)
+{
+    for (int i = 0; i < dock_count; i++) {
+        c26_puts("DOCK ");
+        c26_puts(dock[i].name);
+        c26_putc(' ');
+        c26_put_uint((uint64_t)(dock[i].x + dock[i].w / 2));
+        c26_putc(' ');
+        c26_put_uint((uint64_t)(dock_top() + DOCK_H / 2));
+        c26_putc('\n');
+    }
+    if (dock_count == 0) c26_puts("DOCK EMPTY\n");
+}
+
+static void dock_draw(void)
+{
+    int y = dock_top();
+    c26_fill_rect(0, y, (int)C26_SCREEN_WIDTH, DOCK_H, 0x1a1a2e);
+    c26_fill_rect(0, y, (int)C26_SCREEN_WIDTH, 2, 0x6570bd);
+    for (int i = 0; i < dock_count; i++) {
+        dock_tile_t *tile = &dock[i];
+        c26_fill_rect(tile->x, y + 6, tile->w, DOCK_H - 12, 0x35409a);
+        c26_draw_text(tile->x + 8, y + 13, tile->name, 0xffffff, 0x35409a, 2);
+    }
+}
+
+/* A click in the dock strip launches the tile under the pointer. Returns 1
+   if the click was inside the dock (so window hit-testing is skipped). */
+static int dock_click(int x, int y)
+{
+    if (y < dock_top()) return 0;
+    for (int i = 0; i < dock_count; i++) {
+        if (x >= dock[i].x && x < dock[i].x + dock[i].w) {
+            c26_cart_run(dock[i].name);
+            return 1;
+        }
+    }
+    return dock_count > 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Surface primitives (draw into a process surface, clipped)           */
 
@@ -370,6 +457,9 @@ void c26_compositor_flush(void)
         process->surface_damaged = 0;
         blit_window(process, proc_surface[z_order[i]]);
     }
+    if (dock_count > 0) {
+        dock_draw();
+    }
     if (z_count > 0) {
         c26_desktop_draw_pointer();
     }
@@ -383,6 +473,9 @@ int c26_wm_click(int x, int y, int pressed)
         dragging = -1;
         resizing = -1;
         return 0;
+    }
+    if (dock_click(x, y)) {
+        return 1;
     }
     for (int i = z_count - 1; i >= 0; i--) {
         int job = z_order[i];
