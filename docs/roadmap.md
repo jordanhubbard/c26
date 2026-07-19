@@ -92,6 +92,20 @@ WINDOW/FOCUS/SEND so the window manager and IPC are scriptable from the
 built-in language. C26FS filenames now allow '.'. The experiment's closing
 verdict is in docs/experiment.md. **The charted course is complete.**
 
+## Delivered: c26 Scheme — a Lisp built-in language (2026-07-19)
+
+A second built-in language, reframing the machine toward the Lisp machine
+as much as the C64. `src/scheme.c` is a small integer Scheme — reader,
+printer, tagged values (immediate fixnums), a tree-walking evaluator with
+proper tail calls, a conservative mark-sweep GC, and escape-only `call/cc`.
+Its primitives are the desktop SDKs (graphics, audio, fs, screen), so
+closures and higher-order functions drive real hardware. It coexists with
+BASIC (`SCHEME` / `exit`), host-compiles for `make test` (with `call/cc`
+and GC-stress tests), runs a seeded `DEMO.SCM` in smoke, and uses a
+freestanding RV64 `setjmp` in the kernel. Optional Scheme follow-ups:
+moving/compacting GC, full re-entrant `call/cc`, quasiquote, a windowed
+Scheme editor.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,
