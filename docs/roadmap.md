@@ -106,6 +106,33 @@ freestanding RV64 `setjmp` in the kernel. Optional Scheme follow-ups:
 moving/compacting GC, full re-entrant `call/cc`, quasiquote, a windowed
 Scheme editor.
 
+## Delivered: TCP + DNS — the network is reachable end to end (2026-07-19)
+
+The 2026-07-17 backlog declined TCP and DNS because they could not be gated
+deterministically. Both now ship, gated:
+
+- **A single-connection kernel TCP client** in `src/net.c`: a compact state
+  machine (SYN handshake with retransmit, in-order receive that only ACKs
+  what it buffers, FIN/RST teardown) over the existing IPv4 layer, with a
+  pseudo-header checksum. `c26_tcp_connect/send/recv/close` and BASIC `TCP
+  a,b,c,d,port` / `TCP SEND` / `TCP RECV` / `TCP CLOSE`.
+- **The `guestfwd` + scripted host peer harness** that makes TCP shippable
+  under the honesty rule: QEMU's own TCP terminates the guest side and pipes
+  the stream to `scripts/tcp_peer.py`, so the smoke gate drives a full
+  handshake / send / recv / close against a real, deterministic peer with no
+  external network.
+- **A DNS A-record resolver over UDP** to QEMU user-net's 10.0.2.3, with a
+  dotted-quad fast path; BASIC `RESOLVE "host"`. The pure query/parse codec
+  lives in `include/c26_dns.h` and is host-tested (`tests/test_dns.c`,
+  including name compression and CNAME-chain skipping); the recursive path is
+  verified live (`RESOLVE "example.com"`), and the smoke gate asserts the
+  deterministic literal path.
+
+Immediate-mode network statements pump only the network while they wait, not
+console input, so a blocking `TCP`/`RESOLVE` cannot re-enter the line editor.
+Optional follow-ups: a BASIC `TCP "host",port` connect-by-name, and a
+`FETCH`/HTTP-get cartridge closing the built-in-language network surface.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,

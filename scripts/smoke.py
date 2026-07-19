@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ELF = ROOT / "build" / "c26.elf"
 DISK = ROOT / "build" / "c26-smoke.img"
+TCP_PEER = ROOT / "scripts" / "tcp_peer.py"
 UDP_PORT = 12000 + (os.getpid() % 3000)
 NET_APP_PORT = UDP_PORT + 1
 udp_echo_reply = b""
@@ -55,6 +56,14 @@ FIRST_BOOT_MARKERS = [
     "IF DONE",           # IF false branch skipped, program continued
     "MACHINE: COMMODORE",  # string var assign, concat, PRINT
     "AFFIRMATIVE",         # string INPUT + string IF comparison
+    # Real networking: DNS resolves a dotted-quad, and the kernel TCP client
+    # completes a full handshake / send / recv / close against the scripted
+    # host peer reached through QEMU guestfwd (real TCP, deterministic).
+    "RESOLVED 10.0.2.2",
+    "TCP CONNECTED",
+    "TCP SENT 9",
+    "TCP RECV C26-TCP-OK HELLO-C26",
+    "TCP CLOSED",
     # c26 Scheme REPL: compute, define, higher-order load, and an escape
     # continuation — the built-in Lisp coexisting with BASIC.
     "C26 SCHEME - LISP REPL",
@@ -187,6 +196,11 @@ sound 0,0
 device write 128 99
 device read 128
 print "clock ";time
+resolve "10.0.2.2"
+tcp 10,0,2,100,80
+tcp send "HELLO-C26"
+tcp recv
+tcp close
 scheme
 (display "SCM-ADD ")(display (+ 40 2))(newline)
 (define (sq x) (* x x))
@@ -263,8 +277,13 @@ def qemu_command() -> list[str]:
         "-device",
         "virtio-blk-device,drive=c26disk",
         "-netdev",
+        # UDP echo/NET-app hostfwds, plus a guestfwd that hands any guest TCP
+        # connection to 10.0.2.100:80 to a scripted host peer — QEMU's own TCP
+        # terminates the guest side, so the kernel TCP client is exercised
+        # against a real, deterministic peer with no external network.
         f"user,id=net0,hostfwd=udp:127.0.0.1:{UDP_PORT}-:2600,"
-        f"hostfwd=udp:127.0.0.1:{NET_APP_PORT}-:2601",
+        f"hostfwd=udp:127.0.0.1:{NET_APP_PORT}-:2601,"
+        f"guestfwd=tcp:10.0.2.100:80-cmd:{sys.executable} {TCP_PEER}",
         "-device",
         "virtio-net-device,netdev=net0",
     ]
@@ -482,8 +501,9 @@ def main() -> int:
           "higher-order DEMO.SCM driving the desktop), graphics, sound, "
           "C26FS v2, two-boot persistence, multiprocessing U-mode cartridges "
           "(contained fault, preemptive kill, concurrent job), windows + "
-          "IPC, FILES/EDIT with spawn, a real UDP round trip, and a "
-          "guest-initiated power-off")
+          "IPC, FILES/EDIT with spawn, a real UDP round trip, a kernel TCP "
+          "client handshaking with a scripted host peer over guestfwd, DNS "
+          "resolution, and a guest-initiated power-off")
     return 0
 
 

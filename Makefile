@@ -48,7 +48,7 @@ build: $(ELF)
 
 # Host-side unit tests: the BASIC interpreter and C26FS compile unmodified
 # on the host against shims, so logic bugs surface without a QEMU boot.
-TEST_BINS := $(BUILD)/host/test_basic $(BUILD)/host/test_fs $(BUILD)/host/test_scheme
+TEST_BINS := $(BUILD)/host/test_basic $(BUILD)/host/test_fs $(BUILD)/host/test_scheme $(BUILD)/host/test_dns
 
 $(BUILD)/host/test_%: tests/test_%.c tests/host_shim.c tests/host_shim.h $(wildcard src/*.c include/*.h)
 	mkdir -p $(BUILD)/host
@@ -59,6 +59,11 @@ $(BUILD)/host/test_%: tests/test_%.c tests/host_shim.c tests/host_shim.h $(wildc
 $(BUILD)/host/test_scheme: tests/test_scheme.c src/scheme.c include/c26_scheme.h
 	mkdir -p $(BUILD)/host
 	$(HOSTCC) $(HOSTCFLAGS) tests/test_scheme.c src/scheme.c -o $@
+
+# The DNS codec is a header-only pure module; the test needs no shim or .c.
+$(BUILD)/host/test_dns: tests/test_dns.c include/c26_dns.h
+	mkdir -p $(BUILD)/host
+	$(HOSTCC) $(HOSTCFLAGS) tests/test_dns.c -o $@
 
 $(BUILD)/host/scheme: tools/scheme_repl.c src/scheme.c include/c26_scheme.h
 	mkdir -p $(BUILD)/host

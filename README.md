@@ -67,7 +67,8 @@ host operating system.
   a running program.
 - BASIC hardware statements over the SDKs: `SCREEN`, `CLS`, `COLOR` (C64
   palette or 24-bit RGB), `PLOT`, `LINE`, `RECT`, `TEXT`, `SOUND`, `DEVICE
-  READ/WRITE`, `ROBOT`, plus `PEEK`/`POKE` compatibility aliases.
+  READ/WRITE`, `ROBOT`, `TCP`/`RESOLVE` networking, plus `PEEK`/`POKE`
+  compatibility aliases.
 - `LIST`, `EDIT`, `RUN`, `NEW`, `DIR`, `SAVE`, `LOAD`, `DELETE`, `RENAME`
   manage stored programs (256 lines of 80 characters); `RUN NAME` launches
   a cartridge; `EDIT n` recalls a line for in-place editing.
@@ -145,10 +146,14 @@ custom QEMU invocations must also pass:
 
 Block storage, GPU, keyboard, mouse, PCM audio, and **networking** have real
 QEMU emulated-device backends. The network stack is a small honest IPv4
-implementation over virtio-net — ARP, ICMP echo reply, and UDP — on QEMU's
-user network (guest 10.0.2.15, gateway 10.0.2.2). A kernel UDP echo service
-on port 2600 is reachable from the host through `hostfwd`, and cartridges
-get `udp_bind`/`udp_send`/`udp_recv` syscalls. The I2C and CAN SDKs remain
+implementation over virtio-net — ARP, ICMP echo reply, UDP, a
+single-connection TCP client, and a DNS A-record resolver — on QEMU's user
+network (guest 10.0.2.15, gateway 10.0.2.2). A kernel UDP echo service on
+port 2600 is reachable from the host through `hostfwd`, and cartridges get
+`udp_bind`/`udp_send`/`udp_recv` syscalls. BASIC `TCP`/`RESOLVE` drive the
+TCP client and resolver; the smoke gate handshakes with a scripted host peer
+through QEMU `guestfwd`, so the TCP path is verified against a real,
+deterministic peer with no external network. The I2C and CAN SDKs remain
 deterministic in-kernel fabrics for safe demos; they do not claim physical
 buses. The 3D and ray-tracing paths run on the RISC-V CPU, which keeps their
 behavior available without a host graphics API.

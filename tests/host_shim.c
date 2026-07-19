@@ -157,6 +157,23 @@ void c26_scheme_enter(void) { c26_puts("C26 SCHEME\n"); }
 void c26_scheme_leave(void) {}
 int c26_scheme_feed(const char *line) { (void)line; return 1; }
 
+/* Networking: the transport is target-only (virtio-net), so on the host the
+ * TCP/DNS surface is stubbed offline — the pure DNS codec is covered by
+ * tests/test_dns.c and the live paths by the smoke gate. */
+void c26_net_poll(void) {}
+int c26_tcp_connect(uint32_t ip, uint16_t port) { (void)ip; (void)port; return 0; }
+int c26_tcp_connected(void) { return 0; }
+int c26_tcp_state(void) { return 0; }
+int c26_tcp_send(const void *d, size_t s) { (void)d; (void)s; return 0; }
+int c26_tcp_recv(void *b, size_t c) { (void)b; (void)c; return -1; }
+void c26_tcp_close(void) {}
+int c26_dns_resolve(const char *name, uint32_t *out_ip)
+{
+    (void)name;
+    (void)out_ip;
+    return 0;
+}
+
 /* Graphics */
 uint32_t *c26_framebuffer_pixels(void) { return pixels; }
 void c26_framebuffer_present(void) {}

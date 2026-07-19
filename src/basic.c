@@ -4,6 +4,7 @@
 #include "c26_devices.h"
 #include "c26_fs.h"
 #include "c26_graphics.h"
+#include "c26_net.h"
 
 #define BASIC_LINE_COUNT 256U
 #define BASIC_LINE_LENGTH 80U
@@ -1011,6 +1012,99 @@ static exec_t exec_text(parser_t *p)
     return ok_next();
 }
 
+/* TCP a,b,c,d,port | TCP SEND "text" | TCP RECV | TCP CLOSE. Connect and
+ * recv pump the network while they wait, with tick-based timeouts. */
+static exec_t exec_tcp(parser_t *p)
+{
+    const char *cursor = c26_skip_spaces(p->cursor);
+    if (keyword(cursor, "SEND")) {
+        cursor = c26_skip_spaces(cursor + 4);
+        if (*cursor != '"') return fail("SYNTAX");
+        cursor++;
+        char data[256];
+        size_t n = 0;
+        while (*cursor != '\0' && *cursor != '"' && n < sizeof(data)) {
+            data[n++] = *cursor++;
+        }
+        if (*cursor != '"') return fail("SYNTAX");
+        if (c26_tcp_send(data, n) <= 0) return fail("TCP NOT CONNECTED");
+        c26_puts("TCP SENT ");
+        c26_put_uint(n);
+        c26_putc('\n');
+        return ok_next();
+    }
+    if (keyword(cursor, "RECV")) {
+        char buffer[512];
+        uint64_t deadline = c26_interrupt_ticks() + 200;
+        while (c26_interrupt_ticks() < deadline) {
+            int n = c26_tcp_recv(buffer, sizeof(buffer) - 1);
+            if (n > 0) {
+                buffer[n] = '\0';
+                c26_puts("TCP RECV ");
+                c26_puts(buffer);
+                c26_putc('\n');
+                return ok_next();
+            }
+            if (n < 0) {
+                c26_puts("TCP EOF\n");
+                return ok_next();
+            }
+            /* Pump only the network, not console input: in immediate mode a
+               full io_pump would re-enter process_line with the next line. */
+            c26_net_poll();
+            c26_idle();
+        }
+        c26_puts("TCP RECV NONE\n");
+        return ok_next();
+    }
+    if (keyword(cursor, "CLOSE")) {
+        c26_tcp_close();
+        c26_puts("TCP CLOSED\n");
+        return ok_next();
+    }
+    int64_t v[5];
+    if (parse_arguments(p, v, 5, 5) < 0) {
+        return fail(p->error != 0 ? p->error : "SYNTAX");
+    }
+    uint32_t ip = ((uint32_t)(v[0] & 0xff) << 24) |
+                  ((uint32_t)(v[1] & 0xff) << 16) |
+                  ((uint32_t)(v[2] & 0xff) << 8) | (uint32_t)(v[3] & 0xff);
+    if (!c26_tcp_connect(ip, (uint16_t)v[4])) return fail("TCP OFFLINE");
+    uint64_t deadline = c26_interrupt_ticks() + 400;
+    while (c26_interrupt_ticks() < deadline && c26_tcp_state() == 1) {
+        c26_net_poll();
+        c26_idle();
+    }
+    c26_puts(c26_tcp_connected() ? "TCP CONNECTED\n" : "TCP FAILED\n");
+    return ok_next();
+}
+
+/* RESOLVE "host" — DNS lookup, printing RESOLVED a.b.c.d or RESOLVE FAILED. */
+static exec_t exec_resolve(parser_t *p)
+{
+    const char *cursor = c26_skip_spaces(p->cursor);
+    if (*cursor != '"') return fail("SYNTAX");
+    cursor++;
+    char name[128];
+    size_t n = 0;
+    while (*cursor != '\0' && *cursor != '"' && n < sizeof(name) - 1) {
+        name[n++] = *cursor++;
+    }
+    if (*cursor != '"') return fail("SYNTAX");
+    name[n] = '\0';
+    uint32_t ip = 0;
+    if (!c26_dns_resolve(name, &ip)) {
+        c26_puts("RESOLVE FAILED\n");
+        return ok_next();
+    }
+    c26_puts("RESOLVED ");
+    c26_put_uint((ip >> 24) & 0xff); c26_putc('.');
+    c26_put_uint((ip >> 16) & 0xff); c26_putc('.');
+    c26_put_uint((ip >> 8) & 0xff); c26_putc('.');
+    c26_put_uint(ip & 0xff); c26_putc('\n');
+    return ok_next();
+}
+
 static exec_t exec_sound(parser_t *p)
 {
     int64_t values[4];
@@ -1230,6 +1324,14 @@ static exec_t exec_statement(const char *text, long pc)
     if (keyword(line, "SOUND")) {
         p.cursor = line + 5;
         return exec_sound(&p);
+    }
+    if (keyword(line, "TCP")) {
+        p.cursor = line + 3;
+        return exec_tcp(&p);
+    }
+    if (keyword(line, "RESOLVE")) {
+        p.cursor = line + 7;
+        return exec_resolve(&p);
     }
     if (keyword(line, "DEVICE")) {
         p.cursor = line + 6;

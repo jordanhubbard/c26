@@ -1,4 +1,5 @@
 #include "c26.h"
+#include "c26_dns.h"
 #include "c26_net.h"
 #include "c26_virtio.h"
 
@@ -17,6 +18,7 @@
 
 #define OUR_IP 0x0a00020fU     /* 10.0.2.15 (QEMU user net default) */
 #define GATEWAY_IP 0x0a000202U /* 10.0.2.2 */
+#define DNS_SERVER 0x0a000203U /* 10.0.2.3 (QEMU user net DNS) */
 
 typedef struct {
     c26_virtq_desc_t descriptors[C26_VIRTQ_SIZE];
@@ -284,6 +286,267 @@ static void handle_udp(const uint8_t *frame, const uint8_t *ip, size_t size)
     binding->head++;
 }
 
+/* ------------------------------------------------------------------ */
+/* TCP: a deliberately small single-connection client                  */
+
+#define IP_PROTO_TCP 6U
+#define TCP_FIN 0x01U
+#define TCP_SYN 0x02U
+#define TCP_RST 0x04U
+#define TCP_PSH 0x08U
+#define TCP_ACK 0x10U
+#define TCP_WINDOW 2048U
+#define TCP_DATA_MAX 512U
+#define TCP_RX_MAX 2048U
+#define TCP_REXMIT_TICKS 40U /* ~0.4s at the 100 Hz timer */
+#define TCP_SYN_RETRIES 5
+
+enum {
+    TCP_CLOSED = 0,
+    TCP_SYN_SENT,
+    TCP_ESTABLISHED,
+    TCP_CLOSE_WAIT, /* peer sent FIN; we may still drain rxbuf */
+    TCP_FIN_WAIT,   /* we sent FIN, awaiting peer's */
+    TCP_FAILED,
+};
+
+static struct {
+    int state;
+    uint32_t remote_ip;
+    uint16_t remote_port;
+    uint16_t local_port;
+    uint32_t snd_una;
+    uint32_t snd_nxt;
+    uint32_t rcv_nxt;
+    uint8_t rxbuf[TCP_RX_MAX];
+    unsigned int rx_len;
+    int syn_pending;
+    int syn_retries;
+    uint64_t rexmit_deadline;
+} tcp;
+
+static uint16_t tcp_checksum(uint32_t src, uint32_t dst, const uint8_t *seg,
+                             uint16_t seg_len)
+{
+    uint32_t sum = 0;
+    sum += (src >> 16) & 0xffff;
+    sum += src & 0xffff;
+    sum += (dst >> 16) & 0xffff;
+    sum += dst & 0xffff;
+    sum += IP_PROTO_TCP;
+    sum += seg_len;
+    for (uint16_t i = 0; i + 1 < seg_len; i += 2) sum += load16(seg + i);
+    if (seg_len & 1) sum += (uint32_t)seg[seg_len - 1] << 8;
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+static void send_tcp(uint8_t flags, uint32_t seq, const uint8_t *data,
+                     uint16_t len)
+{
+    if (!have_gateway_mac) {
+        send_arp_request();
+        return;
+    }
+    uint8_t frame[14 + 20 + 20 + TCP_DATA_MAX];
+    memcpy(frame, gateway_mac, 6);
+    memcpy(frame + 6, our_mac, 6);
+    store16(frame + 12, ETH_TYPE_IP);
+    uint8_t *ip = frame + 14;
+    ip[0] = 0x45;
+    ip[1] = 0;
+    store16(ip + 2, (uint16_t)(20 + 20 + len));
+    store16(ip + 4, 0);
+    store16(ip + 6, 0x4000);
+    ip[8] = 64;
+    ip[9] = IP_PROTO_TCP;
+    store16(ip + 10, 0);
+    store32(ip + 12, OUR_IP);
+    store32(ip + 16, tcp.remote_ip);
+    store16(ip + 10, checksum16(ip, 20));
+    uint8_t *t = ip + 20;
+    store16(t, tcp.local_port);
+    store16(t + 2, tcp.remote_port);
+    store32(t + 4, seq);
+    store32(t + 8, (flags & TCP_ACK) ? tcp.rcv_nxt : 0);
+    t[12] = 5 << 4; /* data offset: 5 words, no options */
+    t[13] = flags;
+    store16(t + 14, TCP_WINDOW);
+    store16(t + 16, 0);
+    store16(t + 18, 0);
+    if (len) memcpy(t + 20, data, len);
+    store16(t + 16, tcp_checksum(OUR_IP, tcp.remote_ip, t, (uint16_t)(20 + len)));
+    transmit(frame, 14 + 20 + 20 + len);
+}
+
+static void handle_tcp(const uint8_t *ip, size_t size)
+{
+    size_t ihl = (size_t)(ip[0] & 0xf) * 4;
+    const uint8_t *t = ip + ihl;
+    if (size < 14 + ihl + 20 || tcp.state == TCP_CLOSED) {
+        return;
+    }
+    if (load32(ip + 12) != tcp.remote_ip ||
+        load16(t) != tcp.remote_port ||
+        load16(t + 2) != tcp.local_port) {
+        return;
+    }
+    uint32_t seg_seq = load32(t + 4);
+    uint32_t seg_ack = load32(t + 8);
+    uint8_t flags = t[13];
+    size_t data_off = (size_t)(t[12] >> 4) * 4;
+    size_t total = load16(ip + 2);
+    size_t payload_len = total > ihl + data_off ? total - ihl - data_off : 0;
+    const uint8_t *payload = t + data_off;
+
+    if (flags & TCP_RST) {
+        tcp.state = TCP_FAILED;
+        return;
+    }
+    if (tcp.state == TCP_SYN_SENT) {
+        if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK) &&
+            seg_ack == tcp.snd_nxt) {
+            tcp.rcv_nxt = seg_seq + 1;
+            tcp.snd_una = seg_ack;
+            tcp.state = TCP_ESTABLISHED;
+            tcp.syn_pending = 0;
+            send_tcp(TCP_ACK, tcp.snd_nxt, 0, 0);
+        }
+        return;
+    }
+    if ((flags & TCP_ACK) && seg_ack - tcp.snd_una <= tcp.snd_nxt - tcp.snd_una) {
+        tcp.snd_una = seg_ack;
+    }
+    if (payload_len > 0 && seg_seq == tcp.rcv_nxt) {
+        unsigned int space = TCP_RX_MAX - tcp.rx_len;
+        unsigned int copy = payload_len < space ? (unsigned int)payload_len
+                                                : space;
+        memcpy(tcp.rxbuf + tcp.rx_len, payload, copy);
+        tcp.rx_len += copy;
+        tcp.rcv_nxt += copy; /* ack only what we accepted */
+        send_tcp(TCP_ACK, tcp.snd_nxt, 0, 0);
+    } else if (payload_len > 0) {
+        send_tcp(TCP_ACK, tcp.snd_nxt, 0, 0); /* duplicate/out of order */
+    }
+    if ((flags & TCP_FIN) && seg_seq + payload_len == tcp.rcv_nxt) {
+        tcp.rcv_nxt += 1;
+        send_tcp(TCP_ACK, tcp.snd_nxt, 0, 0);
+        tcp.state = tcp.state == TCP_FIN_WAIT ? TCP_CLOSED : TCP_CLOSE_WAIT;
+    }
+}
+
+static void tcp_poll(void)
+{
+    if (tcp.state == TCP_SYN_SENT && tcp.syn_pending &&
+        c26_interrupt_ticks() >= tcp.rexmit_deadline) {
+        if (tcp.syn_retries >= TCP_SYN_RETRIES) {
+            tcp.state = TCP_FAILED;
+            tcp.syn_pending = 0;
+            return;
+        }
+        tcp.syn_retries++;
+        tcp.rexmit_deadline = c26_interrupt_ticks() + TCP_REXMIT_TICKS;
+        send_tcp(TCP_SYN, tcp.snd_una, 0, 0);
+    }
+}
+
+int c26_tcp_connect(uint32_t ip, uint16_t port)
+{
+    if (!online) return 0;
+    tcp.remote_ip = ip;
+    tcp.remote_port = port;
+    tcp.local_port = (uint16_t)(40000 + (c26_interrupt_ticks() & 0x3fff));
+    uint32_t iss = (uint32_t)(c26_interrupt_ticks() * 2654435761u) ^ 0xC0DE1234u;
+    tcp.snd_una = iss;
+    tcp.snd_nxt = iss + 1; /* SYN consumes one sequence number */
+    tcp.rcv_nxt = 0;
+    tcp.rx_len = 0;
+    tcp.syn_pending = 1;
+    tcp.syn_retries = 0;
+    tcp.state = TCP_SYN_SENT;
+    tcp.rexmit_deadline = c26_interrupt_ticks() + TCP_REXMIT_TICKS;
+    if (!have_gateway_mac) send_arp_request();
+    send_tcp(TCP_SYN, iss, 0, 0);
+    return 1;
+}
+
+int c26_tcp_state(void) { return tcp.state; }
+int c26_tcp_connected(void) { return tcp.state == TCP_ESTABLISHED; }
+
+int c26_tcp_send(const void *data, size_t size)
+{
+    if (tcp.state != TCP_ESTABLISHED) return 0;
+    if (size > TCP_DATA_MAX) size = TCP_DATA_MAX;
+    send_tcp(TCP_PSH | TCP_ACK, tcp.snd_nxt, data, (uint16_t)size);
+    tcp.snd_nxt += size;
+    return (int)size;
+}
+
+int c26_tcp_recv(void *buf, size_t capacity)
+{
+    c26_net_poll();
+    if (tcp.rx_len == 0) {
+        return (tcp.state == TCP_CLOSE_WAIT || tcp.state == TCP_CLOSED ||
+                tcp.state == TCP_FAILED)
+                   ? -1
+                   : 0;
+    }
+    unsigned int n = tcp.rx_len < capacity ? tcp.rx_len : (unsigned int)capacity;
+    memcpy(buf, tcp.rxbuf, n);
+    for (unsigned int i = n; i < tcp.rx_len; i++) tcp.rxbuf[i - n] = tcp.rxbuf[i];
+    tcp.rx_len -= n;
+    return (int)n;
+}
+
+void c26_tcp_close(void)
+{
+    if (tcp.state == TCP_ESTABLISHED || tcp.state == TCP_CLOSE_WAIT) {
+        send_tcp(TCP_FIN | TCP_ACK, tcp.snd_nxt, 0, 0);
+        tcp.snd_nxt += 1;
+        tcp.state = tcp.state == TCP_CLOSE_WAIT ? TCP_CLOSED : TCP_FIN_WAIT;
+    } else {
+        tcp.state = TCP_CLOSED;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* DNS: a tiny blocking A-record resolver over UDP                     */
+
+#define DNS_PORT 53U
+#define DNS_CLIENT_PORT 5333U
+#define DNS_TIMEOUT_TICKS 300U /* ~3s at the 100 Hz timer */
+#define DNS_RETRY_TICKS 50U
+
+int c26_dns_resolve(const char *name, uint32_t *out_ip)
+{
+    if (!name || !out_ip) return 0;
+    if (c26_dns_parse_literal(name, out_ip)) return 1;
+    if (!online) return 0;
+    uint16_t id = (uint16_t)(c26_interrupt_ticks() ^ 0x2611u);
+    uint8_t query[300];
+    int qlen = c26_dns_build_query(query, sizeof query, name, id);
+    if (qlen <= 0) return 0;
+    c26_udp_bind(DNS_CLIENT_PORT); /* idempotent across calls */
+    uint8_t resp[512];
+    while (c26_udp_recv(DNS_CLIENT_PORT, 0, 0, resp, sizeof resp) >= 0) {
+        /* drain any stale datagrams from an earlier resolve */
+    }
+    uint64_t deadline = c26_interrupt_ticks() + DNS_TIMEOUT_TICKS;
+    uint64_t next_send = 0;
+    while (c26_interrupt_ticks() < deadline) {
+        if (c26_interrupt_ticks() >= next_send) {
+            if (!have_gateway_mac) send_arp_request();
+            else send_udp(DNS_SERVER, DNS_PORT, DNS_CLIENT_PORT, query,
+                          (size_t)qlen);
+            next_send = c26_interrupt_ticks() + DNS_RETRY_TICKS;
+        }
+        int n = c26_udp_recv(DNS_CLIENT_PORT, 0, 0, resp, sizeof resp);
+        if (n > 0 && c26_dns_parse_answer(resp, (size_t)n, id, out_ip)) return 1;
+        c26_idle();
+    }
+    return 0;
+}
+
 static void handle_frame(const uint8_t *frame, size_t size)
 {
     if (size < 14) {
@@ -305,6 +568,8 @@ static void handle_frame(const uint8_t *frame, size_t size)
         handle_icmp(frame, ip, size);
     } else if (ip[9] == IP_PROTO_UDP) {
         handle_udp(frame, ip, size);
+    } else if (ip[9] == IP_PROTO_TCP) {
+        handle_tcp(ip, size);
     }
 }
 
@@ -327,6 +592,7 @@ void c26_net_poll(void)
             c26_virtq_submit(&rx_queue, (uint16_t)id);
         }
     }
+    tcp_poll();
     c26_virtio_ack_interrupt(&net_device);
 }
 
