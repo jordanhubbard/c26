@@ -232,6 +232,22 @@ when Homebrew LLVM is absent) and `qemu-system-misc`, so no bespoke setup is
 needed. The honesty rule is now enforced automatically, not by hand; a green
 badge on the README reflects the live gate (first run: 4m04s end to end).
 
+## Delivered: a self-hosting tiny-C compiler (2026-07-19)
+
+`apps/tinyc` compiles a small C subset from a C26FS source file straight to a
+runnable RV64 cartridge, on the machine — the self-hosting endgame the backlog
+flagged as the hardest stretch. The subset: an implicit `main` body with `int`
+declarations, assignment, `print(expr)`, `if/else`, `while`, `return`, and
+expressions over `+ - * /` and the six comparisons with C precedence. Codegen
+is a single-pass stack machine with branch backpatching, reusing the RV64
+encoders and cartridge-header format from `apps/asm`; it emits M-extension
+`mul`/`div` and keeps the api pointer in `s0` with a 32-slot variable frame.
+The smoke gate compiles `tests/tinyc/sum.c` — a `while` loop summing 1..10 —
+into a cartridge and runs it, requiring the output `55` (the loop) and `10`
+(`2*3+4`, exercising precedence). With this the machine has three ways to
+program itself: BASIC, Scheme, and now C through the on-board compiler, plus
+assembly through the assembler.
+
 ## Delivered: richer on-board assembler (2026-07-19)
 
 `apps/asm` gained a preprocessor pass (run before its two assembly passes, so

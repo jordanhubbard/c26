@@ -63,7 +63,9 @@ host operating system.
   supports `.MACRO`/`.ENDM` with `\1..\9` args, `.INCLUDE`, expression
   operands (`MSG+4`, `617+617`), and a data section
   (`.BYTE`/`.WORD`/`.QUAD`/`.ASCIZ`/`.ALIGN`); `MONITOR` disassembles what it
-  produces.
+  produces. `TINYC` goes further: a self-hosting compiler for a small C subset
+  (`int`, `if`/`while`, `print`, arithmetic and comparisons) that emits a
+  runnable RV64 cartridge on the machine.
 - A scriptable desktop: BASIC statements `WINDOW j,x,y`, `FOCUS j`, and
   `SEND j,"msg"` drive the window manager and inter-process messaging from
   the built-in language.

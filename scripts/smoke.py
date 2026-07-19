@@ -90,7 +90,7 @@ FIRST_BOOT_MARKERS = [
 SECOND_BOOT_MARKERS = [
     # DEMO + HELLO.ASM + BOOT written by the guest, twelve cartridges
     # installed host-side, HI assembled on the machine.
-    "C26FS: mounted 25 file(s)",
+    "C26FS: mounted 27 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -145,6 +145,9 @@ SECOND_BOOT_MARKERS = [
     "ASSEMBLED FEAT.ASM",
     "MACRO ASM WORKS",
     "1234",
+    # Tiny-C: a C subset compiled to a cartridge on the machine, then run.
+    "TINYC COMPILED",
+    "55",   # SUM.C: while-loop sum of 1..10, compiled and executed
     # M7 scriptable desktop: BASIC SEND delivers a message to a running
     # job across address spaces.
     "PONG GOT PING",
@@ -428,6 +431,12 @@ SECOND_BOOT_STAGES = [
     ('feat.asm featout\n', 3.0, 'ASSEMBLED FEAT.ASM'),
     ('q', 2.0),
     ('run featout\n', 3.0, 'MACRO ASM WORKS'),  # macro+include prints; expr=1234
+    # Tiny-C: compile SUM.C (a while loop summing 1..10) to a cartridge on the
+    # machine, then run it — the self-hosting C endgame.
+    ('run tinyc\n', 3.0, 'TINYC CART ONLINE'),
+    ('sum.c out\n', 3.0, 'TINYC COMPILED'),
+    ('q', 2.0),
+    ('run out\n', 3.0, '55'),   # loop sum 1..10 = 55, then 2*3+4 = 10
     ('run pong\n', 2.0, 'PONG CART ONLINE'),
     ('\x14send 0,"PING"\n', 3.0, 'PONG GOT PING'),  # script a running job
     ('kill 0\n', 2.0),
@@ -609,9 +618,10 @@ def main() -> int:
                    "CALC=build/calc.cart", "CLOCK=build/clock.cart",
                    "HEXEDIT=build/hexedit.cart", "SHEET=build/sheet.cart",
                    "ROBOT=build/robot.cart", "SNAKE=build/snake.cart",
-                   "MONITOR=build/monitor.cart",
+                   "MONITOR=build/monitor.cart", "TINYC=build/tinyc.cart",
                    "FEAT.ASM=tests/asm/feat.asm",
-                   "FMSG.ASM=tests/asm/fmsg.asm"])
+                   "FMSG.ASM=tests/asm/fmsg.asm",
+                   "SUM.C=tests/tinyc/sum.c"])
     if install.returncode != 0:
         sys.stderr.write(install.stdout)
         sys.stderr.write(install.stderr)
@@ -676,7 +686,8 @@ def main() -> int:
           "launching apps through synthetic pointer clicks, and a shared "
           "clipboard (copy/paste across apps), FILES/EDIT with "
           "spawn, an application suite (calc, clock, sheet, robot, hexedit, "
-          "snake) and an RV64 disassembler, a real UDP round trip, a kernel TCP "
+          "snake), an RV64 disassembler, and a self-hosting tiny-C compiler, "
+          "a real UDP round trip, a kernel TCP "
           "client handshaking with a scripted host peer over guestfwd, DNS "
           "resolution, and a guest-initiated power-off")
     return 0
