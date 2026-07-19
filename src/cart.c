@@ -467,6 +467,15 @@ void c26_compositor_flush(void)
 }
 
 /* Window-manager input, called by the desktop with pointer coordinates. */
+/* Drop any in-progress title-bar drag or corner resize. Called when input
+   leaves the compositor (e.g. Esc to the desktop) so a held button doesn't
+   leave a window stuck to the pointer after the release is delivered elsewhere. */
+void c26_wm_cancel_drag(void)
+{
+    dragging = -1;
+    resizing = -1;
+}
+
 int c26_wm_click(int x, int y, int pressed)
 {
     if (!pressed) {

@@ -291,6 +291,7 @@ static void console_event(c26_input_event_t event)
         if (c26_basic_running()) {
             c26_basic_feed_char(0x1b);
         } else {
+            c26_wm_cancel_drag(); /* don't carry a held drag into desktop mode */
             c26_screen_set_mode(C26_SCREEN_DESKTOP);
             redraw_requested = 1;
         }

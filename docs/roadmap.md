@@ -232,6 +232,43 @@ when Homebrew LLVM is absent) and `qemu-system-misc`, so no bespoke setup is
 needed. The honesty rule is now enforced automatically, not by hand; a green
 badge on the README reflects the live gate (first run: 4m04s end to end).
 
+## Consolidation review (2026-07-19)
+
+A pass of adversarial reviews over the session's new code (apps, the RV64
+disassembler and tiny-C codegen, the BASIC additions, the TCP/DNS stack, and
+the window-manager/clipboard/dock/pointer code) found and fixed a set of real
+bugs that the happy-path smoke could not reach:
+
+- **BASIC:** a self-recursive `DEF FN` now raises `FORMULA TOO COMPLEX`
+  instead of overflowing the native stack; a `DIM` with a huge subscript is
+  rejected (was an integer-overflow past the pool bounds); `MID$` with a
+  negative length is empty; a non-numeric `DATA` item advances the cursor
+  (was an infinite `READ` loop). Regression tests added.
+- **TCP:** `handle_tcp` now bounds the payload by the real frame size (a lying
+  IP total-length could drive an out-of-bounds read), validates the data
+  offset, fixes FIN detection across a 32-bit sequence wrap, and advertises
+  the actual free receive window.
+- **Apps:** the calculator keeps its result when chaining after `=`; snake no
+  longer instantly self-collides on some resets.
+- **Tools:** the disassembler decodes the M-extension (`mul`/`div`/`rem`,
+  which tiny-C emits — they were mislabeled as `add`/`xor`/`or`); tiny-C now
+  synthesizes full 64-bit integer literals instead of silently truncating to
+  32 bits.
+- **WM:** a title-bar drag or corner resize is cancelled when input leaves for
+  the desktop (Esc), so a window no longer sticks to the pointer.
+
+The reviewers verified the hypothesized worst case — a U-mode cartridge
+escaping its sandbox through the clipboard syscalls — is **not** possible: the
+`clip_set`/`clip_get` paths validate the full pointer range through
+`c26_vm_translate` before any copy.
+
+Known, deliberately-scoped limitations of the minimal network stack (documented
+rather than papered over): the single-connection TCP client does not
+retransmit *data* or a lost FIN (only the SYN), and the DNS resolver trusts a
+response on its transaction ID without matching the question name — both
+acceptable on the lossless, non-adversarial QEMU user-net path, and honest
+future work if the stack ever faces a real network.
+
 ## Delivered: a self-hosting tiny-C compiler (2026-07-19)
 
 `apps/tinyc` compiles a small C subset from a C26FS source file straight to a
@@ -296,12 +333,20 @@ in the smoke run (launch → drive → read a marker → quit):
 
 # Backlog (2026-07-17 stopping point)
 
+**Status (2026-07-19): worked through.** Everything below has since shipped and
+is gated by `make check` — a second built-in language (Scheme), real TCP + DNS,
+window management + dock + clipboard, BASIC depth (strings, arrays, DEF FN,
+DATA/READ), CI, a faster smoke gate, a six-app suite, an RV64 disassembler, a
+richer assembler, and a self-hosting tiny-C compiler — as recorded in the
+"Delivered" sections above. The only items deliberately declined are the
+double-buffered present and C26FS subdirectories (both unnecessary, with
+rationale above), and the optional `FETCH` app / uIP port under networking.
+
 The charted course (M1–M7) is complete: a memory-protected, preemptively
-multitasking, windowed, networked, self-hosting home computer in ~8,800
-readable lines that boots to READY in under a second. What follows is
-prioritized future work, none of it on a critical path. Every item must
-preserve the invariant that one person can read the whole machine and that
-`make check` gates every capability headlessly.
+multitasking, windowed, networked, self-hosting home computer that boots to
+READY in under a second. What follows is the original prioritized backlog,
+kept for the record. Every item preserved the invariant that one person can
+read the whole machine and that `make check` gates every capability headlessly.
 
 ## 1. Networking — the open design decision (highest value, needs a choice)
 

@@ -371,7 +371,9 @@ static void send_tcp(uint8_t flags, uint32_t seq, const uint8_t *data,
     store32(t + 8, (flags & TCP_ACK) ? tcp.rcv_nxt : 0);
     t[12] = 5 << 4; /* data offset: 5 words, no options */
     t[13] = flags;
-    store16(t + 14, TCP_WINDOW);
+    /* Advertise the real free space so a stalled reader throttles the peer
+       instead of provoking endless retransmits of dropped data. */
+    store16(t + 14, (uint16_t)(TCP_RX_MAX - tcp.rx_len));
     store16(t + 16, 0);
     store16(t + 18, 0);
     if (len) memcpy(t + 20, data, len);
@@ -395,8 +397,15 @@ static void handle_tcp(const uint8_t *ip, size_t size)
     uint32_t seg_ack = load32(t + 8);
     uint8_t flags = t[13];
     size_t data_off = (size_t)(t[12] >> 4) * 4;
+    /* The data offset must name a real 20+ byte header that fits the frame. */
+    if (data_off < 20 || 14 + ihl + data_off > size) {
+        return;
+    }
     size_t total = load16(ip + 2);
     size_t payload_len = total > ihl + data_off ? total - ihl - data_off : 0;
+    /* Never trust the IP length past the actual frame: a peer can lie. */
+    size_t avail = size - 14 - ihl - data_off;
+    if (payload_len > avail) payload_len = avail;
     const uint8_t *payload = t + data_off;
 
     if (flags & TCP_RST) {
@@ -428,7 +437,8 @@ static void handle_tcp(const uint8_t *ip, size_t size)
     } else if (payload_len > 0) {
         send_tcp(TCP_ACK, tcp.snd_nxt, 0, 0); /* duplicate/out of order */
     }
-    if ((flags & TCP_FIN) && seg_seq + payload_len == tcp.rcv_nxt) {
+    if ((flags & TCP_FIN) &&
+        (uint32_t)(seg_seq + (uint32_t)payload_len) == tcp.rcv_nxt) {
         tcp.rcv_nxt += 1;
         send_tcp(TCP_ACK, tcp.snd_nxt, 0, 0);
         tcp.state = tcp.state == TCP_FIN_WAIT ? TCP_CLOSED : TCP_CLOSE_WAIT;

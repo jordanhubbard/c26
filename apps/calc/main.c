@@ -125,7 +125,9 @@ static void press(const c26_api_t *api, char k)
         op = 0;
         entering = 0;
     } else { /* + - * / */
-        apply();
+        /* Only fold in a freshly-typed operand; chaining straight after '='
+           (or a repeated operator) keeps the current result as the left side. */
+        if (entering) apply();
         op = k;
         entering = 0;
     }

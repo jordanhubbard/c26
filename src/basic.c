@@ -55,6 +55,7 @@ static int64_t array_pool[ARRAY_POOL];
 static int array_pool_used;
 static char fn_body[26][80];
 static int fn_param[26];    /* parameter variable index, -1 = undefined */
+static int fn_depth;        /* active FN call depth, bounds native recursion */
 
 /* DATA/READ/RESTORE: a cursor that walks DATA statements in program order. */
 static size_t data_pc;           /* next program line to scan for DATA */
@@ -286,7 +287,7 @@ static void reset_arrays_fns(void)
 static int array_alloc(int idx, int elements)
 {
     if (array_len[idx] != 0 || elements < 1 ||
-        array_pool_used + elements > ARRAY_POOL) {
+        elements > ARRAY_POOL - array_pool_used) { /* overflow-safe */
         return 0;
     }
     array_off[idx] = array_pool_used;
@@ -399,13 +400,19 @@ static int64_t parse_factor(parser_t *p)
                     set_error(p, "UNDEF'D FUNCTION");
                     return 0;
                 }
+                if (fn_depth >= 24) { /* bound native recursion */
+                    set_error(p, "FORMULA TOO COMPLEX");
+                    return 0;
+                }
                 int pv = fn_param[idx];
                 int64_t saved = vars[pv];
                 vars[pv] = arg;
                 parser_t q;
                 q.cursor = fn_body[idx];
                 q.error = 0;
+                fn_depth++;
                 int64_t result = parse_expr(&q);
+                fn_depth--;
                 vars[pv] = saved;
                 if (q.error) {
                     set_error(p, q.error);
@@ -735,8 +742,12 @@ static int eval_string_term(parser_t *p, char *out, size_t cap)
             return 0;
         }
         int64_t start = parse_expr(p); /* 1-based */
-        int64_t count = -1;
-        if (match_char(p, ',')) count = parse_expr(p);
+        int64_t count = 0;
+        int has_count = 0;
+        if (match_char(p, ',')) {
+            count = parse_expr(p);
+            has_count = 1;
+        }
         if (!match_char(p, ')') || p->error) {
             set_error(p, p->error ? p->error : "SYNTAX");
             return 0;
@@ -746,7 +757,8 @@ static int eval_string_term(parser_t *p, char *out, size_t cap)
         size_t from = (size_t)start - 1;
         if (from > slen) from = slen;
         size_t avail = slen - from;
-        size_t take = count < 0 ? avail : (size_t)count;
+        if (count < 0) count = 0; /* a given negative length means empty */
+        size_t take = has_count ? (size_t)count : avail;
         if (take > avail) take = avail;
         for (size_t i = 0; i < take; i++) {
             if (length + 1 < cap) out[length++] = s[from + i];
@@ -915,7 +927,7 @@ static exec_t exec_dim(parser_t *p)
         if (p->error != 0 || !match_char(p, ')')) {
             return fail(p->error != 0 ? p->error : "SYNTAX");
         }
-        if (n < 0) return fail("ILLEGAL QUANTITY");
+        if (n < 0 || n >= ARRAY_POOL) return fail("ILLEGAL QUANTITY");
         if (array_len[idx] != 0) return fail("REDIM'D ARRAY");
         if (!array_alloc(idx, (int)n + 1)) return fail("OUT OF MEMORY");
         if (!match_char(p, ',')) break;
@@ -984,7 +996,10 @@ static const char *data_next(void)
 
 static void data_skip_comma(void)
 {
-    const char *c = c26_skip_spaces(data_cursor);
+    /* Consume the rest of the current item and its separator, so a malformed
+       (e.g. non-numeric) item still advances the cursor rather than looping. */
+    const char *c = data_cursor;
+    while (*c != '\0' && *c != ',') c++;
     if (*c == ',') c++;
     data_cursor = c;
 }

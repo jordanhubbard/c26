@@ -257,10 +257,20 @@ static void emit_li(int rd, int64_t imm)
         emit32(enc_i(0x13, 0, rd, R_X0, imm));       /* addi rd, x0, imm */
         return;
     }
-    int64_t hi = (imm + 0x800) >> 12;
-    int64_t lo = imm - (hi << 12);
-    emit32(enc_u(0x37, rd, hi));                      /* lui   rd, hi */
-    emit32(enc_i(0x1b, 0, rd, rd, lo));               /* addiw rd, rd, lo */
+    if (imm >= -2147483648LL && imm <= 2147483647LL) { /* fits signed 32-bit */
+        int64_t hi = (imm + 0x800) >> 12;
+        int64_t lo = imm - (hi << 12);
+        emit32(enc_u(0x37, rd, hi));                  /* lui   rd, hi */
+        emit32(enc_i(0x1b, 0, rd, rd, lo));           /* addiw rd, rd, lo */
+        return;
+    }
+    /* Full 64-bit: peel off the low 12 bits, load the rest recursively, then
+       shift up and add the low part back (standard RISC-V constant synthesis). */
+    int64_t lo = imm & 0xfff;
+    if (lo >= 0x800) lo -= 0x1000;                    /* sign-extend low 12 */
+    emit_li(rd, (imm - lo) >> 12);                    /* upper part */
+    emit32(enc_i(0x13, 1, rd, rd, 12));               /* slli rd, rd, 12 */
+    if (lo != 0) emit32(enc_i(0x13, 0, rd, rd, lo));  /* addi rd, rd, lo */
 }
 
 static void emit_mv(int rd, int rs) { emit32(enc_i(0x13, 0, rd, rs, 0)); }

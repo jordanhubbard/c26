@@ -47,7 +47,7 @@ typedef struct {
     uint64_t (*ticks)(void);
     void (*idle)(void);
 
-    /* Graphics: direct 640x480 BGRX framebuffer plus primitives.
+    /* Graphics: direct 1280x960 BGRX framebuffer plus primitives.
        present() pushes the framebuffer to the display. */
     uint32_t *(*framebuffer)(void);
     void (*pixel)(int x, int y, uint32_t color);

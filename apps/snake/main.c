@@ -82,9 +82,10 @@ static void reset_game(void)
     score = 0;
     game_over = 0;
     place_food();
-    /* Nudge the initial heading toward the food when it's an easy line up. */
-    if (food_y == cy && food_x < cx) { dir_x = -1; dir_y = 0; }
-    else if (food_x == cx && food_y < cy) { dir_x = 0; dir_y = -1; }
+    /* Nudge the initial heading toward the food only in directions that don't
+       run back into the body (which lies to the left of the head): up, down,
+       or keep the default rightward crawl. Never steer left into the neck. */
+    if (food_x == cx && food_y < cy) { dir_x = 0; dir_y = -1; }
     else if (food_x == cx && food_y > cy) { dir_x = 0; dir_y = 1; }
 }
 

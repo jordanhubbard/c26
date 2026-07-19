@@ -151,10 +151,14 @@ static void disasm(uint32_t insn, char *out)
         put_s(out, &n, ", ");
         put_d(out, &n, (f3 == 0) ? immI : (int)rs2);
         break;
-    case 0x33:
-        if (f3 == 0 && f7 == 0x20) put_s(out, &n, "sub");
+    case 0x33: {
+        static const char *m_ops[8] = {"mul", "mulh", "mulhsu", "mulhu",
+                                       "div", "divu", "rem", "remu"};
+        if (f7 == 0x01) put_s(out, &n, m_ops[f3]); /* M extension */
+        else if (f3 == 0 && f7 == 0x20) put_s(out, &n, "sub");
         else if (f3 == 5 && f7 == 0x20) put_s(out, &n, "sra");
         else put_s(out, &n, reg_ops[f3]);
+    }
         out[n++] = ' ';
         put_reg(out, &n, rd);
         put_s(out, &n, ", ");

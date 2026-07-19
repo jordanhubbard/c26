@@ -328,6 +328,23 @@ int main(void)
     expect("5\n", "READ into array elements");
     expect("1\n", "RESTORE to a line number");
 
+    /* Regressions from the consolidation review. */
+    command("def fn r(x) = fn r(x)");   /* self-recursive FN must not crash */
+    command("print fn r(1)");
+    expect("?FORMULA TOO COMPLEX ERROR", "DEF FN recursion is bounded");
+    command("dim g(2147483646)");        /* huge subscript must be rejected */
+    expect("?ILLEGAL QUANTITY ERROR", "DIM subscript overflow rejected");
+    command("h$ = \"hello\"");
+    command("print \"[\";mid$(h$,2,-1);\"]\"");
+    expect("[]\n", "MID$ negative length is empty");
+    command("new");
+    command("10 data word");
+    command("20 read a");
+    command("30 print \"read done\"");
+    shim_output_reset();
+    feed("run\n");                        /* non-numeric DATA must not loop */
+    expect("READ DONE\n", "READ of non-numeric DATA advances");
+
     /* Line editor: cursor movement, mid-line insert/delete, history. */
     command("print 3\x1f""12"); /* left once, insert before the 3 */
     expect("123\n", "insert before cursor");
