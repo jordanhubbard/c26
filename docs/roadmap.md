@@ -204,6 +204,16 @@ assertions in `tests/test_basic.c` (the real interpreter driven through
   order; `READ` pulls the next items into scalar, string, or array variables
   (`OUT OF DATA` at the end); `RESTORE` rewinds to the start or to a line.
 
+## Delivered: continuous integration (2026-07-19)
+
+`.github/workflows/ci.yml` runs the single gate — `make check` (host unit
+tests + the two-boot headless QEMU smoke) — on every push and pull request.
+The runner installs the freestanding toolchain from stock packages (PATH
+`clang` + `lld` + `llvm-objcopy`, which the Makefile already falls back to
+when Homebrew LLVM is absent) and `qemu-system-misc`, so no bespoke setup is
+needed. The honesty rule is now enforced automatically, not by hand; a green
+badge on the README reflects the live gate (first run: 4m04s end to end).
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,

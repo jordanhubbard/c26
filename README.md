@@ -1,5 +1,7 @@
 # c26
 
+[![CI](https://github.com/jordanhubbard/c26/actions/workflows/ci.yml/badge.svg)](https://github.com/jordanhubbard/c26/actions/workflows/ci.yml)
+
 c26 is an instant-on RISC-V home computer for 2026. It boots directly on
 QEMU `virt` into a full-screen BASIC console on its own display, runs a real
 line-numbered BASIC with expressions, control flow, and hardware statements,
