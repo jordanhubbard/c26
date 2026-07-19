@@ -55,6 +55,15 @@ FIRST_BOOT_MARKERS = [
     "IF DONE",           # IF false branch skipped, program continued
     "MACHINE: COMMODORE",  # string var assign, concat, PRINT
     "AFFIRMATIVE",         # string INPUT + string IF comparison
+    # c26 Scheme REPL: compute, define, higher-order load, and an escape
+    # continuation — the built-in Lisp coexisting with BASIC.
+    "C26 SCHEME - LISP REPL",
+    "SCM-ADD 42",
+    "SCM-SQ 81",
+    "squares: (36 25 16 9 4 1)",  # DEMO.SCM higher-order functions
+    "scheme demo complete",
+    "SCM-CC 70001",               # call/cc non-local exit (k 70000)
+    "4243",                       # back in BASIC after exit
     "?ILLEGAL QUANTITY ERROR",  # SOUND rejects voice 9
     "DEVICE WRITE OK",
     "DEVICE READ returned 99",
@@ -67,7 +76,7 @@ FIRST_BOOT_MARKERS = [
 SECOND_BOOT_MARKERS = [
     # DEMO + HELLO.ASM + BOOT written by the guest, twelve cartridges
     # installed host-side, HI assembled on the machine.
-    "C26FS: mounted 15 file(s)",
+    "C26FS: mounted 16 file(s)",
     "LOADED BOOT",
     '10 PRINT "PERSISTED ACROSS BOOT"',
     "PERSISTED ACROSS BOOT",
@@ -178,6 +187,14 @@ sound 0,0
 device write 128 99
 device read 128
 print "clock ";time
+scheme
+(display "SCM-ADD ")(display (+ 40 2))(newline)
+(define (sq x) (* x x))
+(display "SCM-SQ ")(display (sq 9))(newline)
+(load "DEMO.SCM")
+(display "SCM-CC ")(display (+ 1 (call/cc (lambda (k) (k 70000) 999))))(newline)
+exit
+print 4242+1
 new
 10 print "old version"
 save boot
@@ -461,11 +478,12 @@ def main() -> int:
         sys.stderr.write(f"\nNET app ACK failed: got {net_app_reply!r}\n")
         return 1
 
-    print("c26 smoke passed: language, graphics, sound, C26FS v2, two-boot "
-          "persistence, multiprocessing U-mode cartridges (clean run, "
-          "contained fault, preemptive kill, concurrent background job), "
-          "windows + IPC, the FILES/EDIT toolkit apps with spawn, a real "
-          "UDP round trip over virtio-net, and a guest-initiated power-off")
+    print("c26 smoke passed: BASIC + a built-in Scheme REPL (call/cc, a "
+          "higher-order DEMO.SCM driving the desktop), graphics, sound, "
+          "C26FS v2, two-boot persistence, multiprocessing U-mode cartridges "
+          "(contained fault, preemptive kill, concurrent job), windows + "
+          "IPC, FILES/EDIT with spawn, a real UDP round trip, and a "
+          "guest-initiated power-off")
     return 0
 
 

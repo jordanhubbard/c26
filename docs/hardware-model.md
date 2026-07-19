@@ -44,6 +44,7 @@ replacing magic memory addresses with typed SDK calls.
 | Audio | Eight voices mixed to 48kHz S16 stereo and virtio-sound |
 | Input | Virtio keyboard and relative mouse plus serial console |
 | User language | C26 BASIC V3: expressions, control flow, INPUT/GET, hardware statements, save/load |
+| Second language | c26 Scheme: integer Lisp REPL (GC, tail calls, call/cc); primitives are the desktop SDKs |
 | Device SDK | Register, I2C, CAN and port-addressed packet calls |
 | Robotics | Sensor and motor SDK layered over I2C and CAN |
 

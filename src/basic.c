@@ -53,6 +53,8 @@ static int history_browse; /* -1 = not browsing */
 static int escape_state;   /* serial ANSI arrows: 0 none, 1 ESC, 2 ESC[ */
 static char pending_edit[96]; /* text to replay into the editor after prompt */
 static int has_pending_edit;
+static int scheme_mode;         /* console is a Scheme REPL, not BASIC */
+static int scheme_continuation; /* mid-form (unbalanced parens) */
 static basic_line_t program[BASIC_LINE_COUNT];
 static size_t program_count;
 static char file_buffer[C26_FS_FILE_MAX + 1];
@@ -442,6 +444,7 @@ static int input_read_line(char *buffer, size_t capacity)
             if (ch < 32 || ch > 126 || length + 1 >= capacity) {
                 continue;
             }
+            if (ch >= 'a' && ch <= 'z') ch -= ('a' - 'A'); /* BASIC upper-cases */
             buffer[length++] = ch;
             c26_putc(ch);
         }
@@ -831,7 +834,12 @@ static exec_t exec_get(parser_t *p, long pc)
     }
     c26_io_pump();
     char ch;
-    vars[index] = queue_pop(&ch) ? (int64_t)(uint8_t)ch : 0;
+    if (queue_pop(&ch)) {
+        if (ch >= 'a' && ch <= 'z') ch -= ('a' - 'A'); /* BASIC GET upper-cases */
+        vars[index] = (int64_t)(uint8_t)ch;
+    } else {
+        vars[index] = 0;
+    }
     return ok_next();
 }
 
@@ -1593,6 +1601,12 @@ static void process_line(const char *line)
         /* Debug exit: no farewell, no flush — the machine stops NOW. */
         c26_poweroff();
     }
+    if (keyword(line, "SCHEME")) {
+        scheme_mode = 1;
+        scheme_continuation = 0;
+        c26_scheme_enter();
+        return;
+    }
     if (keyword(line, "JOBS")) {
         c26_puts("JOBS:\n");
         c26_cart_list_jobs();
@@ -1666,7 +1680,20 @@ static void process_line(const char *line)
 
 static void prompt(void)
 {
-    c26_puts("] ");
+    if (scheme_mode) {
+        c26_puts(scheme_continuation ? "  " : "> ");
+    } else {
+        c26_puts("] ");
+    }
+}
+
+static int line_is(const char *line, const char *word)
+{
+    line = c26_skip_spaces(line);
+    while (*word != '\0') {
+        if (*line++ != *word++) return 0;
+    }
+    return *c26_skip_spaces(line) == '\0';
 }
 
 /* ------------------------------------------------------------------ */
@@ -1815,6 +1842,28 @@ static const char hello_source[] =
     "RET\n"
     "MSG: .ASCIZ \"HELLO FROM SELF-HOSTED CODE\\N\"\n";
 
+/* A Scheme program the on-board interpreter can run: type SCHEME, then
+ * (load "DEMO.SCM"). Shows higher-order functions and the desktop-as-
+ * primitives drawing through the same interpreter that computes. */
+static const char scheme_demo[] =
+    "; c26 Scheme self demo\n"
+    "(define (map f xs)\n"
+    "  (if (null? xs) '() (cons (f (car xs)) (map f (cdr xs)))))\n"
+    "(define (squares n)\n"
+    "  (if (= n 0) '() (cons (* n n) (squares (- n 1)))))\n"
+    "(display \"squares: \")(write (squares 6))(newline)\n"
+    "(screen 1)\n"
+    "(define (bands i)\n"
+    "  (if (< i 8)\n"
+    "      (begin (color (+ i 8))\n"
+    "             (rect (+ 60 (* i 60)) (+ 60 (* i 50))\n"
+    "                   (- 1160 (* i 120)) (- 840 (* i 100)) 0)\n"
+    "             (bands (+ i 1)))\n"
+    "      'done))\n"
+    "(bands 0)\n"
+    "(color 1)(text 500 470 \"C26 SCHEME\")(present)\n"
+    "(display \"scheme demo complete\")(newline)\n";
+
 void c26_basic_init(void)
 {
     c26_puts("C26 BASIC V3.0 - EXPRESSIONS, CONTROL FLOW, HARDWARE STATEMENTS\n");
@@ -1828,6 +1877,7 @@ void c26_basic_init(void)
                 c26_puts("C26FS: DEMO program installed\n");
             }
             c26_fs_save("HELLO.ASM", hello_source, sizeof(hello_source) - 1);
+            c26_fs_save("DEMO.SCM", scheme_demo, sizeof(scheme_demo) - 1);
         }
         c26_puts("TYPE LOAD DEMO THEN RUN FOR THE SELF DEMO\n");
     }
@@ -1890,9 +1940,9 @@ void c26_basic_feed_char(char ch)
             break_flag = 1;
             return;
         }
-        if (ch >= 'a' && ch <= 'z') {
-            ch -= ('a' - 'A');
-        }
+        /* Queue the raw key; consumers fold case as they need it (BASIC GET
+           and cartridge getchar upper-case; Scheme keeps it verbatim). This
+           way type-ahead replayed into a Scheme session stays lowercase. */
         queue_push(ch);
         return;
     }
@@ -1920,6 +1970,17 @@ void c26_basic_feed_char(char ch)
         history_browse = -1;
         input_length = 0;
         input_cursor = 0;
+        if (scheme_mode) {
+            if (!scheme_continuation && line_is(input_line, "exit")) {
+                scheme_mode = 0;
+                c26_scheme_leave();
+                c26_puts("READY\n");
+            } else {
+                scheme_continuation = !c26_scheme_feed(input_line);
+            }
+            prompt();
+            return;
+        }
         process_line(input_line);
         prompt();
         if (has_pending_edit) {
@@ -1957,6 +2018,7 @@ void c26_basic_feed_char(char ch)
         return;
     }
     if (ch < 32 || ch > 126) return;
-    if (ch >= 'a' && ch <= 'z') ch -= ('a' - 'A');
+    /* Scheme is case-sensitive; only BASIC folds to upper case. */
+    if (!scheme_mode && ch >= 'a' && ch <= 'z') ch -= ('a' - 'A');
     editor_insert(ch);
 }

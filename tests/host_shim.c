@@ -153,6 +153,9 @@ void c26_cart_list_jobs(void) { c26_puts("  (NO JOBS)\n"); }
 void c26_cart_focus_console(void) {}
 void c26_cart_focus_next(void) {}
 void c26_poweroff(void) { exit(0); }
+void c26_scheme_enter(void) { c26_puts("C26 SCHEME\n"); }
+void c26_scheme_leave(void) {}
+int c26_scheme_feed(const char *line) { (void)line; return 1; }
 
 /* Graphics */
 uint32_t *c26_framebuffer_pixels(void) { return pixels; }

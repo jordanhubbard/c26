@@ -15,9 +15,21 @@
 
 #include "c26_scheme.h"
 
-#include <setjmp.h> /* host prototype; kernel provides a tiny riscv setjmp */
 #include <stddef.h>
 #include <stdint.h>
+
+/* setjmp: the host uses libc; the freestanding kernel uses its own. */
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__
+#include <setjmp.h>
+#define SCM_JMP_BUF jmp_buf
+#define SCM_SETJMP setjmp
+#define SCM_LONGJMP longjmp
+#else
+#include "c26_setjmp.h"
+#define SCM_JMP_BUF c26_jmp_buf
+#define SCM_SETJMP c26_setjmp
+#define SCM_LONGJMP c26_longjmp
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Values: immediate fixnums + boxed objects                           */
@@ -37,6 +49,7 @@ typedef enum {
     T_STRING,
     T_PRIMITIVE,
     T_CLOSURE,
+    T_CONTINUATION,
     T_EOF,
     T_UNSPEC,
 } obj_type;
@@ -67,6 +80,10 @@ struct obj {
             value body;
             value env;
         } closure;
+        struct {
+            int depth;      /* escape-stack index this continuation targets */
+            unsigned int id; /* generation, to detect use after its extent */
+        } continuation;
         int boolean;
     } as;
 };
@@ -107,15 +124,27 @@ static value global_env; /* a GC root; defined during scm_init */
 static char *stack_bottom;
 static unsigned int gc_cycles;
 
+/* Escape-only continuations: call/cc captures a jump target; invoking the
+ * continuation performs a non-local exit back to it (exceptions / early
+ * return). Full re-entrant call/cc is a later subtask. */
+#define ESCAPE_MAX 64
+static struct {
+    SCM_JMP_BUF jmp;
+    value result;
+    unsigned int id;
+} escape_stack[ESCAPE_MAX];
+static int escape_top;
+static unsigned int escape_generation;
+
 static void (*output)(const char *);
 
-static jmp_buf error_jump;
+static SCM_JMP_BUF error_jump;
 static const char *error_message;
 
 static void scm_error(const char *message)
 {
     error_message = message;
-    longjmp(error_jump, 1);
+    SCM_LONGJMP(error_jump, 1);
 }
 
 /* --- Garbage collector: conservative mark-sweep -------------------- *
@@ -186,8 +215,8 @@ static void mark_range(char *lo, char *hi)
 
 static void gc(void)
 {
-    jmp_buf registers;
-    (void)setjmp(registers); /* spill callee-saved registers to the stack */
+    SCM_JMP_BUF registers;
+    (void)SCM_SETJMP(registers); /* spill callee-saved registers to the stack */
 
     for (int i = 0; i < ARENA_OBJECTS; i++) marks[i] = 0;
 
@@ -350,6 +379,14 @@ static value make_closure(value params, value body, value env)
     o->as.closure.params = params;
     o->as.closure.body = body;
     o->as.closure.env = env;
+    return (value)o;
+}
+
+static value make_continuation(int depth, unsigned int id)
+{
+    obj_t *o = allocate(T_CONTINUATION);
+    o->as.continuation.depth = depth;
+    o->as.continuation.id = id;
     return (value)o;
 }
 
@@ -539,6 +576,9 @@ static void write_value(value v, int display)
     case T_CLOSURE:
         emit("#<closure>");
         return;
+    case T_CONTINUATION:
+        emit("#<continuation>");
+        return;
     case T_EOF:
         emit("#<eof>");
         return;
@@ -621,6 +661,7 @@ static value bind_params(value params, value args, value closure_env)
 #define IS_TRUE(v) ((v) != FALSE)
 
 static value eval(value expr, value env);
+static value apply_procedure(value fn, value args);
 
 static value eval_args(value list, value env)
 {
@@ -764,8 +805,64 @@ tail:
         expr = car(body); /* proper tail call */
         goto tail;
     }
+    if (IS_OBJ(fn) && TYPE(fn) == T_CONTINUATION) {
+        return apply_procedure(fn, args); /* non-local exit */
+    }
     scm_error("not applicable");
     return UNSPEC;
+}
+
+/* Apply a procedure to an already-evaluated argument list. Used where the
+ * trampoline is not available (call/cc invoking its receiver). Closures run
+ * their body on the C stack here rather than in tail position. */
+static value apply_procedure(value fn, value args)
+{
+    if (IS_OBJ(fn) && TYPE(fn) == T_PRIMITIVE) {
+        return OBJ(fn)->as.primitive.fn(args);
+    }
+    if (IS_OBJ(fn) && TYPE(fn) == T_CLOSURE) {
+        value env = bind_params(OBJ(fn)->as.closure.params, args,
+                                OBJ(fn)->as.closure.env);
+        value body = OBJ(fn)->as.closure.body;
+        value result = UNSPEC;
+        while (body != NIL) {
+            result = eval(car(body), env);
+            body = cdr(body);
+        }
+        return result;
+    }
+    if (IS_OBJ(fn) && TYPE(fn) == T_CONTINUATION) {
+        int depth = OBJ(fn)->as.continuation.depth;
+        if (depth >= escape_top ||
+            escape_stack[depth].id != OBJ(fn)->as.continuation.id) {
+            scm_error("continuation used outside its dynamic extent");
+        }
+        escape_stack[depth].result = args == NIL ? UNSPEC : car(args);
+        SCM_LONGJMP(escape_stack[depth].jmp, 1);
+    }
+    scm_error("not applicable");
+    return UNSPEC;
+}
+
+/* (call/cc proc): call proc with an escape continuation. If proc invokes it
+ * with a value, call/cc returns that value; otherwise it returns proc's
+ * result normally. */
+static value prim_call_cc(value args)
+{
+    value proc = car(args);
+    if (escape_top >= ESCAPE_MAX) scm_error("call/cc nested too deeply");
+    int depth = escape_top++;
+    escape_stack[depth].id = ++escape_generation;
+
+    if (SCM_SETJMP(escape_stack[depth].jmp) != 0) {
+        value result = escape_stack[depth].result;
+        escape_top = depth; /* unwind the escape point */
+        return result;
+    }
+    value k = make_continuation(depth, escape_stack[depth].id);
+    value result = apply_procedure(proc, cons(k, NIL));
+    escape_top = depth; /* normal return unwinds too */
+    return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -893,10 +990,12 @@ static value prim_write(value args)
     return UNSPEC;
 }
 
-/* Desktop primitives. In the kernel these call c26_draw_* / c26_audio_* /
- * the compositor; in the prototype they emit a textual trace through the
- * sink so the wiring is visible and testable. This is the whole point:
- * every machine capability is one row in the primitive table. */
+/* Desktop primitives. With a platform installed they call the real c26
+ * SDKs; without one they emit a textual trace through the sink, so the same
+ * scheme.c is hardware-free on the host and live in the kernel. Every
+ * machine capability is one hook exposed as one primitive. */
+static const scm_platform_t *platform;
+
 static void trace_call(const char *name, value args)
 {
     emit("[");
@@ -909,40 +1008,138 @@ static void trace_call(const char *name, value args)
     emit("]\n");
 }
 
+static const char *string_chars(value v)
+{
+    if (!IS_OBJ(v) || TYPE(v) != T_STRING) scm_error("expected a string");
+    return OBJ(v)->as.string.chars;
+}
+
 static value prim_cls(value args)
 {
-    trace_call("cls", args);
+    if (platform && platform->cls) platform->cls();
+    else trace_call("cls", args);
     return UNSPEC;
 }
 static value prim_color(value args)
 {
-    trace_call("color", args);
+    if (platform && platform->color) platform->color((int)as_int(car(args)));
+    else trace_call("color", args);
     return UNSPEC;
 }
 static value prim_plot(value args)
 {
-    trace_call("plot", args);
+    if (platform && platform->plot)
+        platform->plot((int)as_int(car(args)), (int)as_int(cadr(args)));
+    else trace_call("plot", args);
     return UNSPEC;
 }
 static value prim_line(value args)
 {
-    trace_call("line", args);
+    if (platform && platform->line)
+        platform->line((int)as_int(car(args)), (int)as_int(cadr(args)),
+                       (int)as_int(caddr(args)),
+                       (int)as_int(car(cdr(cdr(cdr(args))))));
+    else trace_call("line", args);
     return UNSPEC;
 }
 static value prim_rect(value args)
 {
-    trace_call("rect", args);
+    if (platform && platform->rect) {
+        value fill = cdr(cdr(cdr(cdr(args))));
+        platform->rect((int)as_int(car(args)), (int)as_int(cadr(args)),
+                       (int)as_int(caddr(args)),
+                       (int)as_int(car(cdr(cdr(cdr(args))))),
+                       fill != NIL ? (int)as_int(car(fill)) : 0);
+    } else {
+        trace_call("rect", args);
+    }
     return UNSPEC;
 }
 static value prim_text(value args)
 {
-    trace_call("text", args);
+    if (platform && platform->text)
+        platform->text((int)as_int(car(args)), (int)as_int(cadr(args)),
+                       string_chars(caddr(args)));
+    else trace_call("text", args);
+    return UNSPEC;
+}
+static value prim_present(value args)
+{
+    if (platform && platform->present) platform->present();
+    else trace_call("present", args);
+    return UNSPEC;
+}
+static value prim_screen(value args)
+{
+    if (platform && platform->screen) platform->screen((int)as_int(car(args)));
+    else trace_call("screen", args);
     return UNSPEC;
 }
 static value prim_sound(value args)
 {
-    trace_call("sound", args);
+    if (platform && platform->sound)
+        platform->sound((int)as_int(car(args)), (int)as_int(cadr(args)));
+    else trace_call("sound", args);
     return UNSPEC;
+}
+static value prim_fs_save(value args)
+{
+    const char *name = string_chars(car(args));
+    const char *data = string_chars(cadr(args));
+    int length = OBJ(cadr(args))->as.string.length;
+    if (platform && platform->fs_save)
+        return platform->fs_save(name, data, length) ? TRUE : FALSE;
+    trace_call("fs-save", args);
+    return TRUE;
+}
+static value prim_fs_load(value args)
+{
+    const char *name = string_chars(car(args));
+    if (platform && platform->fs_load) {
+        static char buffer[4096];
+        int length = platform->fs_load(name, buffer, sizeof(buffer) - 1);
+        if (length < 0) return FALSE;
+        return make_string(buffer, length);
+    }
+    trace_call("fs-load", args);
+    return FALSE;
+}
+
+/* Read and evaluate every form in a source string, returning the last
+ * result. Used by `load`; saves/restores the reader position so it nests
+ * safely inside an in-progress top-level read. */
+static value eval_all_forms(const char *src)
+{
+    const char *saved = read_ptr;
+    read_ptr = src;
+    value result = UNSPEC;
+    for (;;) {
+        value form = read_expr();
+        if (form == EOF_VAL) break;
+        result = eval(form, global_env);
+    }
+    read_ptr = saved;
+    return result;
+}
+
+/* (load "NAME") — read a C26FS file and evaluate it as Scheme source. */
+static value prim_load(value args)
+{
+    const char *name = string_chars(car(args));
+    if (!(platform && platform->fs_load)) {
+        trace_call("load", args);
+        return FALSE;
+    }
+    static char source[8192];
+    int length = platform->fs_load(name, source, sizeof(source) - 1);
+    if (length < 0) {
+        emit("load: cannot read ");
+        emit(name);
+        emit("\n");
+        return FALSE;
+    }
+    source[length] = '\0';
+    return eval_all_forms(source);
 }
 
 /* (range lo hi) -> (lo lo+1 ... hi-1), handy for the demos. */
@@ -983,6 +1180,8 @@ void scm_init(void)
     string_pool_top = 0;
     symbol_count = 0;
     gc_cycles = 0;
+    escape_top = 0;
+    escape_generation = 0;
     /* A default stack anchor so an allocation before the first
        scm_eval_string still has a valid (if conservative) scan range. */
     char anchor;
@@ -1032,7 +1231,19 @@ void scm_init(void)
     define_primitive("line", prim_line);
     define_primitive("rect", prim_rect);
     define_primitive("text", prim_text);
+    define_primitive("present", prim_present);
+    define_primitive("screen", prim_screen);
     define_primitive("sound", prim_sound);
+    define_primitive("fs-save", prim_fs_save);
+    define_primitive("fs-load", prim_fs_load);
+    define_primitive("load", prim_load);
+    define_primitive("call/cc", prim_call_cc);
+    define_primitive("call-with-current-continuation", prim_call_cc);
+}
+
+void scm_set_platform(const scm_platform_t *p)
+{
+    platform = p;
 }
 
 int scm_eval_string(const char *src, int echo)
@@ -1042,7 +1253,7 @@ int scm_eval_string(const char *src, int echo)
     char anchor;
     stack_bottom = &anchor;
 
-    if (setjmp(error_jump)) {
+    if (SCM_SETJMP(error_jump)) {
         emit("ERROR: ");
         emit(error_message);
         emit("\n");

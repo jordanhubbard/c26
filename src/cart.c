@@ -406,7 +406,10 @@ static long do_syscall(c26_user_frame_t *frame)
     case C26_SYS_GETCHAR: {
         char ch;
         if (current != focused) return -1;
-        return c26_basic_key_pop(&ch) ? (long)(uint8_t)ch : -1;
+        if (!c26_basic_key_pop(&ch)) return -1;
+        /* Cartridges use the uppercase-key convention (e.g. paint's Q/C). */
+        if (ch >= 'a' && ch <= 'z') ch -= ('a' - 'A');
+        return (long)(uint8_t)ch;
     }
     case C26_SYS_MOUSE: {
         int x;

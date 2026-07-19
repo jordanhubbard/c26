@@ -133,6 +133,19 @@ int main(void)
           "(map (lambda (x) (* x x)) '(1 2 3 4))",
           "(1 4 9 16)", "user-defined map");
 
+    /* Escape continuations (call/cc) */
+    check("(call/cc (lambda (k) 42))", "42", "call/cc normal return");
+    check("(+ 1 (call/cc (lambda (k) (k 10) 999)))", "11", "call/cc escapes");
+    check("(define (find pred xs)"
+          "  (call/cc (lambda (return)"
+          "    (begin"
+          "      (define (go ys) (cond ((null? ys) #f)"
+          "        ((pred (car ys)) (return (car ys)))"
+          "        (else (go (cdr ys)))))"
+          "      (go xs)))))"
+          "(find (lambda (x) (> x 3)) '(1 2 3 4 5))",
+          "4", "call/cc early exit from search");
+
     /* Desktop-as-primitives: the machine's APIs are just procedures */
     check("(color 14)", "[color 14]", "desktop primitive trace");
     check("(rect 10 20 100 50 3)", "[rect 10 20 100 50 3]", "rect primitive");

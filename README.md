@@ -73,6 +73,13 @@ host operating system.
   a cartridge; `EDIT n` recalls a line for in-place editing.
 - String variables `A$`..`Z$` with assignment, concatenation, `PRINT`,
   `INPUT`, and `IF A$ = "..."` comparison, alongside the numeric engine.
+- A built-in **Scheme** REPL alongside BASIC (`SCHEME` command, `exit`
+  returns): an integer Lisp with a conservative-mark-sweep GC, proper tail
+  calls, escape continuations (`call/cc`), and a reader/evaluator you can
+  read end to end (`src/scheme.c`). Its primitives *are* the desktop —
+  `plot`, `rect`, `color`, `sound`, `text`, `screen`, `fs-save`, `load` —
+  so closures and higher-order functions drive the real hardware. A fresh
+  disk seeds `DEMO.SCM`; `src/scheme.c` also host-compiles for `make test`.
 - `c26_gl`-style software 3D SDK with filled triangles, color interpolation,
   a depth buffer, and a CPU ray tracer.
 - Eight-voice, 48 kHz stereo audio mixer with waveforms, pan, envelopes, and a

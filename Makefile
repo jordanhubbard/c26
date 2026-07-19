@@ -21,8 +21,8 @@ LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,src/linker.ld \
 HOSTCC ?= cc
 HOSTCFLAGS := -O1 -g -Wall -Wextra -Iinclude -Itests
 
-SRCS := src/boot.S src/trap.S src/user_stubs.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/net.c src/input.c src/devices.c src/graphics.c \
-	src/audio.c src/basic.c src/cart.c src/vm.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
+SRCS := src/boot.S src/trap.S src/user_stubs.S src/setjmp.S src/uart.c src/console.c src/interrupts.c src/runtime.c src/virtio.c src/block.c src/fs.c src/net.c src/input.c src/devices.c src/graphics.c \
+	src/audio.c src/basic.c src/cart.c src/vm.c src/scheme.c src/scheme_glue.c src/desktop.c src/framebuffer.c src/robot.c src/kernel.c
 OBJS := $(patsubst src/%,$(BUILD)/%.o,$(SRCS))
 
 CART_LDFLAGS := -fuse-ld=lld -nostdlib -nostartfiles -Wl,-T,apps/cart.ld \
