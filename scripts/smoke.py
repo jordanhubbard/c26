@@ -56,6 +56,10 @@ FIRST_BOOT_MARKERS = [
     "IF DONE",           # IF false branch skipped, program continued
     "MACHINE: COMMODORE",  # string var assign, concat, PRINT
     "AFFIRMATIVE",         # string INPUT + string IF comparison
+    # BASIC depth: arrays (DIM), DATA/READ, DEF FN, and a string function.
+    "SUM 10",              # DIM d(3) filled by READ from DATA 4,3,2,1
+    "FNSQ 49",             # DEF FN sq(x)=x*x, FN sq(7)
+    "MID BCD",             # MID$("abcdef",2,3)
     # Real networking: DNS resolves a dotted-quad, and the kernel TCP client
     # completes a full handshake / send / recv / close against the scripted
     # host peer reached through QEMU guestfwd (real TCP, deterministic).
@@ -195,6 +199,17 @@ new
 50 if n$ = "yes" then print "affirmative"
 run
 yes
+new
+10 dim d(3)
+20 for i=0 to 3
+30 read d(i)
+40 next
+50 print "sum ";d(0)+d(1)+d(2)+d(3)
+60 def fn s(x) = x*x
+70 print "fnsq ";fn s(7)
+80 print "mid ";mid$("abcdef",2,3)
+90 data 4,3,2,1
+run
 screen 1
 plot 10,10
 print fb

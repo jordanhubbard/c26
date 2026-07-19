@@ -55,6 +55,10 @@ static int64_t array_pool[ARRAY_POOL];
 static int array_pool_used;
 static char fn_body[26][80];
 static int fn_param[26];    /* parameter variable index, -1 = undefined */
+
+/* DATA/READ/RESTORE: a cursor that walks DATA statements in program order. */
+static size_t data_pc;           /* next program line to scan for DATA */
+static const char *data_cursor;  /* position within the current DATA line, or 0 */
 static char input_line[96];
 static size_t input_length;
 static size_t input_cursor;
@@ -946,6 +950,137 @@ static exec_t exec_def(parser_t *p)
     return ok_next();
 }
 
+static void reset_data(void)
+{
+    data_pc = 0;
+    data_cursor = 0;
+}
+
+/* Point data_cursor at the next unread DATA item, or return 0 at end of data. */
+static const char *data_next(void)
+{
+    for (;;) {
+        if (data_cursor != 0) {
+            const char *c = c26_skip_spaces(data_cursor);
+            if (*c != '\0') {
+                data_cursor = c;
+                return c;
+            }
+            data_cursor = 0;
+        }
+        int found = 0;
+        while (data_pc < program_count) {
+            const char *text = program[data_pc].text;
+            data_pc++;
+            if (keyword(text, "DATA")) {
+                data_cursor = text + 4;
+                found = 1;
+                break;
+            }
+        }
+        if (!found) return 0;
+    }
+}
+
+static void data_skip_comma(void)
+{
+    const char *c = c26_skip_spaces(data_cursor);
+    if (*c == ',') c++;
+    data_cursor = c;
+}
+
+static int64_t data_read_number(void)
+{
+    const char *c = data_cursor;
+    int negative = 0;
+    if (*c == '-') { negative = 1; c++; }
+    else if (*c == '+') c++;
+    int64_t v = 0;
+    while (*c >= '0' && *c <= '9') {
+        v = v * 10 + (*c - '0');
+        c++;
+    }
+    data_cursor = c;
+    data_skip_comma();
+    return negative ? -v : v;
+}
+
+static void data_read_string(char *out, size_t cap)
+{
+    const char *c = c26_skip_spaces(data_cursor);
+    size_t n = 0;
+    if (*c == '"') {
+        c++;
+        while (*c != '\0' && *c != '"') {
+            if (n + 1 < cap) out[n++] = *c;
+            c++;
+        }
+        if (*c == '"') c++;
+    } else {
+        while (*c != '\0' && *c != ',') {
+            if (n + 1 < cap) out[n++] = *c;
+            c++;
+        }
+        while (n > 0 && out[n - 1] == ' ') n--;
+    }
+    out[n] = '\0';
+    data_cursor = c;
+    data_skip_comma();
+}
+
+/* READ v[,v...] — pull the next DATA items into scalar, string, or array vars. */
+static exec_t exec_read(parser_t *p)
+{
+    for (;;) {
+        const char *var = c26_skip_spaces(p->cursor);
+        if (!is_upper(*var)) return fail("SYNTAX");
+        int idx = *var - 'A';
+        if (var[1] == '$') { /* string variable */
+            p->cursor = var + 2;
+            if (data_next() == 0) return fail("OUT OF DATA");
+            data_read_string(strvars[idx], sizeof(strvars[0]));
+        } else if (var[1] == '(') { /* array element */
+            p->cursor = var + 1;
+            if (!match_char(p, '(')) return fail("SYNTAX");
+            int64_t subscript = parse_expr(p);
+            if (p->error != 0 || !match_char(p, ')')) {
+                return fail(p->error != 0 ? p->error : "SYNTAX");
+            }
+            if (data_next() == 0) return fail("OUT OF DATA");
+            int64_t value = data_read_number();
+            const char *err = 0;
+            int64_t *slot = array_slot(idx, subscript, &err);
+            if (slot == 0) return fail(err);
+            *slot = value;
+        } else { /* scalar variable */
+            p->cursor = var + 1;
+            if (data_next() == 0) return fail("OUT OF DATA");
+            vars[idx] = data_read_number();
+        }
+        if (!match_char(p, ',')) break;
+    }
+    if (!parse_end(p)) return fail("SYNTAX");
+    return ok_next();
+}
+
+/* RESTORE [line] — rewind the data cursor to the start or to a given line. */
+static exec_t exec_restore(parser_t *p)
+{
+    if (parse_end(p)) {
+        reset_data();
+        return ok_next();
+    }
+    int64_t line = parse_expr(p);
+    if (p->error != 0 || !parse_end(p)) {
+        return fail(p->error != 0 ? p->error : "SYNTAX");
+    }
+    int index = find_line((uint16_t)line);
+    if (index < 0) return fail("UNDEFINED LINE");
+    data_pc = (size_t)index;
+    data_cursor = 0;
+    return ok_next();
+}
+
 static int strings_equal(const char *a, const char *b)
 {
     while (*a != '\0' && *a == *b) {
@@ -1800,6 +1935,17 @@ static exec_t exec_statement(const char *text, long pc)
         c26_putc('\n');
         return ok_next();
     }
+    if (keyword(line, "DATA")) {
+        return ok_next(); /* DATA is consumed by READ, not executed */
+    }
+    if (keyword(line, "READ")) {
+        p.cursor = line + 4;
+        return exec_read(&p);
+    }
+    if (keyword(line, "RESTORE")) {
+        p.cursor = line + 7;
+        return exec_restore(&p);
+    }
     if (keyword(line, "DIM")) {
         p.cursor = line + 3;
         return exec_dim(&p);
@@ -1829,6 +1975,7 @@ static void run_program(void)
     for_depth = 0;
     gosub_depth = 0;
     reset_arrays_fns();
+    reset_data();
     size_t pc = 0;
     const char *error = 0;
     uint16_t error_line = 0;
@@ -2090,6 +2237,7 @@ static void process_line(const char *line)
             strvars[i][0] = '\0';
         }
         reset_arrays_fns();
+    reset_data();
         c26_puts("NEW PROGRAM\n");
         c26_desktop_invalidate();
         return;
@@ -2176,6 +2324,7 @@ static void process_line(const char *line)
     }
     if (keyword(line, "HELP")) {
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
+        c26_puts("DIM DEF FN DATA READ RESTORE  LEN LEFT$ RIGHT$ MID$ CHR$ ASC VAL STR$\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
         c26_puts("DESKTOP: WINDOW J,X,Y | SIZE J,W,H | MIN/MAX J | CLOSE J  FOCUS J  SEND J,\"MSG\"\n");
         c26_puts("CLIP \"TEXT\"  PASTE   (shared clipboard, also Ctrl-W/Ctrl-Y in EDIT)\n");
@@ -2387,6 +2536,7 @@ void c26_basic_init(void)
     c26_puts("TYPE HELP FOR COMMANDS, BYE TO POWER OFF, ESC FOR THE DESKTOP\n");
     program_count = 0;
     reset_arrays_fns();
+    reset_data();
     rng_state = c26_interrupt_ticks() * 6364136223846793005ULL + 1;
     if (c26_fs_online()) {
         size_t size = 0;

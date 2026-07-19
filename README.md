@@ -81,6 +81,10 @@ host operating system.
   a cartridge; `EDIT n` recalls a line for in-place editing.
 - String variables `A$`..`Z$` with assignment, concatenation, `PRINT`,
   `INPUT`, and `IF A$ = "..."` comparison, alongside the numeric engine.
+- BASIC depth: string functions `LEN`/`LEFT$`/`RIGHT$`/`MID$`/`CHR$`/`ASC`/
+  `VAL`/`STR$`, numeric arrays (`DIM A(n)`, auto-dim, bounds-checked),
+  single-parameter user functions (`DEF FN A(x)=expr`), and
+  `DATA`/`READ`/`RESTORE`.
 - A built-in **Scheme** REPL alongside BASIC (`SCHEME` command, `exit`
   returns): an integer Lisp with a conservative-mark-sweep GC, proper tail
   calls, escape continuations (`call/cc`), and a reader/evaluator you can

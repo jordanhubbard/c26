@@ -287,6 +287,47 @@ int main(void)
     expect("9\n", "array survives re-run");
     expect_absent("REDIM", "re-run does not redim-error");
 
+    /* DATA / READ / RESTORE. */
+    command("new");
+    command("10 data 10,20,30");
+    command("20 data 40,\"hello\"");
+    command("30 read a,b,c");
+    command("40 print a+b+c");
+    command("50 read d,e$");
+    command("60 print d");
+    command("70 print e$");
+    command("80 restore");
+    command("90 read f");
+    command("100 print f");
+    shim_output_reset();
+    feed("run\n");
+    expect("60\n", "READ three numbers");
+    expect("40\n", "READ continues across DATA lines");
+    expect("HELLO\n", "READ a string DATA item");
+    expect("10\n", "RESTORE rewinds to the first DATA");
+
+    command("new");
+    command("10 data 1");
+    command("20 read a,b");
+    shim_output_reset();
+    feed("run\n");
+    expect("?OUT OF DATA ERROR", "READ past the end of DATA");
+
+    command("new");
+    command("10 data 1,2,3,4");
+    command("20 dim v(3)");
+    command("30 for i=0 to 3");
+    command("40 read v(i)");
+    command("50 next");
+    command("60 print v(0)+v(3)");
+    command("70 restore 10");
+    command("80 read x");
+    command("90 print x");
+    shim_output_reset();
+    feed("run\n");
+    expect("5\n", "READ into array elements");
+    expect("1\n", "RESTORE to a line number");
+
     /* Line editor: cursor movement, mid-line insert/delete, history. */
     command("print 3\x1f""12"); /* left once, insert before the 3 */
     expect("123\n", "insert before cursor");

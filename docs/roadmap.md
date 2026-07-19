@@ -185,6 +185,25 @@ clicks PAINT's tile and confirms it launched (a second `CART START PAINT`
 beyond the one from `RUN`). With this, every windowing capability — move,
 resize, minimize, close, and launch — is driven through the real pointer code.
 
+## Delivered: BASIC language depth (2026-07-19)
+
+Three rounds of interpreter growth in `src/basic.c`, each covered by host
+assertions in `tests/test_basic.c` (the real interpreter driven through
+`feed_char`) and demonstrated end to end in the smoke gate:
+
+- **String functions** — `LEN`, `LEFT$`, `RIGHT$`, `MID$` (optional length),
+  `CHR$`, `ASC`, `VAL`, `STR$`. The string engine became a term-based
+  evaluator (`eval_string_term` + `+` concatenation); `LEN`/`ASC`/`VAL` join
+  the numeric factor parser.
+- **Arrays and user functions** — `DIM A(n)` (comma lists, 0..n, auto-dim to
+  0..10, bounds-checked) from a shared bump pool, and single-parameter
+  `DEF FN A(x)=expr` stored as source and re-parsed per call. Both reset on
+  `NEW` and at the start of every `RUN`; scalars persist as before. Function
+  and array names are single letters, matching the machine's variable model.
+- **DATA / READ / RESTORE** — a cursor walks `DATA` statements in program
+  order; `READ` pulls the next items into scalar, string, or array variables
+  (`OUT OF DATA` at the end); `RESTORE` rewinds to the start or to a line.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,
