@@ -40,7 +40,7 @@ QEMU_DEVICES := -device virtio-gpu-device -device virtio-keyboard-device \
 	-netdev user,id=net0,hostfwd=udp:127.0.0.1:12600-:2600,hostfwd=udp:127.0.0.1:12601-:2601 \
 	-device virtio-net-device,netdev=net0
 
-.PHONY: all build carts disk run run-headless smoke test check compdb clean
+.PHONY: all build carts disk run run-headless smoke test check compdb scheme-repl clean
 
 all: build carts compdb
 
@@ -48,11 +48,25 @@ build: $(ELF)
 
 # Host-side unit tests: the BASIC interpreter and C26FS compile unmodified
 # on the host against shims, so logic bugs surface without a QEMU boot.
-TEST_BINS := $(BUILD)/host/test_basic $(BUILD)/host/test_fs
+TEST_BINS := $(BUILD)/host/test_basic $(BUILD)/host/test_fs $(BUILD)/host/test_scheme
 
 $(BUILD)/host/test_%: tests/test_%.c tests/host_shim.c tests/host_shim.h $(wildcard src/*.c include/*.h)
 	mkdir -p $(BUILD)/host
 	$(HOSTCC) $(HOSTCFLAGS) $< tests/host_shim.c -o $@
+
+# c26 Scheme is self-contained (no shim); explicit rules override the
+# pattern above so it links only scheme.c.
+$(BUILD)/host/test_scheme: tests/test_scheme.c src/scheme.c include/c26_scheme.h
+	mkdir -p $(BUILD)/host
+	$(HOSTCC) $(HOSTCFLAGS) tests/test_scheme.c src/scheme.c -o $@
+
+$(BUILD)/host/scheme: tools/scheme_repl.c src/scheme.c include/c26_scheme.h
+	mkdir -p $(BUILD)/host
+	$(HOSTCC) $(HOSTCFLAGS) tools/scheme_repl.c src/scheme.c -o $@
+
+# Build and launch the host Scheme REPL prototype.
+scheme-repl: $(BUILD)/host/scheme
+	@$(BUILD)/host/scheme
 
 test: $(TEST_BINS)
 	@set -e; for t in $(TEST_BINS); do echo "== $$t"; $$t; done
