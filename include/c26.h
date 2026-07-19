@@ -47,6 +47,8 @@ void c26_cart_schedule(void);
 int c26_cart_any_runnable(void);
 int c26_cart_kill(int job);
 int c26_cart_move_window(int job, int x, int y);
+int c26_cart_resize_window(int job, int w, int h);
+int c26_cart_set_minimized(int job, int minimized);
 int c26_cart_focus(int job);
 int c26_cart_send(int job, const void *data, size_t size);
 void c26_cart_list_jobs(void);

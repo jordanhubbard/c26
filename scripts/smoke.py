@@ -119,6 +119,9 @@ SECOND_BOOT_MARKERS = [
     "PING CART ONLINE",
     "IPC ROUNDTRIP OK FROM JOB 0",
     "71001",
+    # WM: a window resizes / minimizes / restores / closes, scripted from
+    # BASIC; the job is killed by WINDOW CLOSE and the console keeps going.
+    "81001",
     # The M6 suite: the NET app ACKs a real datagram from U-mode, the
     # tracker and the game come up and exit cleanly.
     "NET CART ONLINE",
@@ -351,6 +354,18 @@ SECOND_BOOT_STAGES = [
     ('print fb\nrun "pong"\n', 3.0),
     ('\x14print fb\nrun "ping"\n', 4.0),
     ('\x14kill 0\nprint 71000+1\n', 4.0),
+    # Window management, scripted from BASIC so the affordances are gated
+    # headlessly: a running cart's window resizes, minimizes, restores, and
+    # closes — each mutating the composited framebuffer (WM checksums below).
+    ('run "pong"\n', 3.0),
+    ('\x14print "WM";fb\n', 2.0),        # baseline: window floats over console
+    ('window size 0,240,160\n', 2.0),
+    ('print "WM";fb\n', 2.0),            # resized -> checksum changes
+    ('window min 0\n', 2.0),
+    ('print "WM";fb\n', 2.0),            # minimized to the title bar
+    ('window max 0\n', 2.0),
+    ('print "WM";fb\n', 2.0),            # restored
+    ('window close 0\nprint 81000+1\n', 3.0),  # close kills the job
     (udp_echo_probe, 1.0),
     ('run "net"\n', 3.0),
     (net_app_probe, 1.0),
@@ -486,6 +501,20 @@ def main() -> int:
         sys.stderr.write("\nframebuffer unchanged by a window — "
                          "compositor did not draw it\n")
         return 1
+    # Window management proof: baseline, resize, minimize, restore — every
+    # window operation must visibly change the composited framebuffer, and
+    # the close must terminate the job.
+    wm_sums = re.findall(r"WM(\d+)", second_output)
+    if len(wm_sums) != 4 or "0" in wm_sums:
+        failures2 = f"expected 4 nonzero WM checksums, got {wm_sums}"
+        sys.stderr.write(second_output)
+        sys.stderr.write("\n" + failures2 + "\n")
+        return 1
+    if any(wm_sums[i] == wm_sums[i + 1] for i in range(3)):
+        sys.stderr.write(second_output)
+        sys.stderr.write(f"\na window op did not change the framebuffer: "
+                         f"{wm_sums}\n")
+        return 1
     # Networking proof: a real UDP datagram went from the host through
     # QEMU's user network into the guest stack and came back.
     if udp_echo_reply != b"C26-NET-PING":
@@ -501,7 +530,8 @@ def main() -> int:
           "higher-order DEMO.SCM driving the desktop), graphics, sound, "
           "C26FS v2, two-boot persistence, multiprocessing U-mode cartridges "
           "(contained fault, preemptive kill, concurrent job), windows + "
-          "IPC, FILES/EDIT with spawn, a real UDP round trip, a kernel TCP "
+          "IPC with resize/minimize/close window management, FILES/EDIT with "
+          "spawn, a real UDP round trip, a kernel TCP "
           "client handshaking with a scripted host peer over guestfwd, DNS "
           "resolution, and a guest-initiated power-off")
     return 0

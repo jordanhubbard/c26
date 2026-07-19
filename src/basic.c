@@ -1350,6 +1350,36 @@ static exec_t exec_statement(const char *text, long pc)
         return ok_next();
     }
     if (keyword(line, "WINDOW")) {
+        const char *sub = c26_skip_spaces(line + 6);
+        /* WINDOW CLOSE j | SIZE j,w,h | MIN j | MAX j | (legacy) j,x,y move. */
+        if (keyword(sub, "CLOSE")) {
+            p.cursor = sub + 5;
+            int64_t j = parse_expr(&p);
+            if (p.error != 0) return fail(p.error);
+            if (!c26_cart_kill((int)j)) return fail("ILLEGAL QUANTITY");
+            return ok_next();
+        }
+        if (keyword(sub, "SIZE")) {
+            p.cursor = sub + 4;
+            int64_t v[3];
+            if (parse_arguments(&p, v, 3, 3) < 0) {
+                return fail(p.error != 0 ? p.error : "SYNTAX");
+            }
+            if (!c26_cart_resize_window((int)v[0], (int)v[1], (int)v[2])) {
+                return fail("ILLEGAL QUANTITY");
+            }
+            return ok_next();
+        }
+        if (keyword(sub, "MIN") || keyword(sub, "MAX")) {
+            int minimize = sub[1] == 'I';
+            p.cursor = sub + 3;
+            int64_t j = parse_expr(&p);
+            if (p.error != 0) return fail(p.error);
+            if (!c26_cart_set_minimized((int)j, minimize)) {
+                return fail("ILLEGAL QUANTITY");
+            }
+            return ok_next();
+        }
         p.cursor = line + 6;
         int64_t values[3];
         if (parse_arguments(&p, values, 3, 3) < 0) {
@@ -1764,7 +1794,7 @@ static void process_line(const char *line)
     if (keyword(line, "HELP")) {
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
-        c26_puts("DESKTOP: WINDOW J,X,Y  FOCUS J  SEND J,\"MSG\"\n");
+        c26_puts("DESKTOP: WINDOW J,X,Y | SIZE J,W,H | MIN/MAX J | CLOSE J  FOCUS J  SEND J,\"MSG\"\n");
         c26_puts("LIST EDIT RUN NEW DIR SAVE LOAD DELETE RENAME RUN NAME JOBS KILL BYE HELP\n");
         c26_puts("STRINGS: A$=\"TEXT\"  PRINT A$  INPUT A$  IF A$=\"X\" THEN\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB TIME  STRINGS: TIME$\n");

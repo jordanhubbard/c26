@@ -34,8 +34,10 @@ host operating system.
   the smoke gate's concurrency proof.
 - A windowed desktop: the BASIC console is the root layer and every process
   owns a movable, decorated window composited over it in z-order — click to
-  focus, drag the title bar to move. Apps query their window size (ABI v2)
-  and get window-local mouse coordinates.
+  focus, drag the title bar to move, drag the corner grip to resize, and use
+  the titlebar minimize/close boxes. Apps query their window size (ABI v2)
+  and get window-local mouse coordinates. `WINDOW SIZE/MIN/MAX/CLOSE` script
+  the same operations from BASIC.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate.

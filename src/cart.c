@@ -27,6 +27,13 @@
 #define BORDER 1
 #define WINDOW_DEFAULT_W 840
 #define WINDOW_DEFAULT_H 620
+
+/* Titlebar affordances (minimize / close) and the bottom-right resize grip. */
+#define BTN 16
+#define BTN_PAD 5
+#define GRIP 14
+#define MIN_WIN_W 140
+#define MIN_WIN_H 70
 #define MAILBOX_SLOTS 4U
 #define MESSAGE_MAX 240U
 
@@ -57,6 +64,7 @@ typedef struct {
     int win_y;
     int win_w;
     int win_h;
+    int minimized; /* collapsed to just the title bar */
     message_t mail[MAILBOX_SLOTS];
     unsigned int mail_head;
     unsigned int mail_tail;
@@ -84,6 +92,7 @@ static int z_count;
 static int dragging = -1;
 static int drag_dx;
 static int drag_dy;
+static int resizing = -1;
 
 /* ------------------------------------------------------------------ */
 /* Surface primitives (draw into a process surface, clipped)           */
@@ -223,23 +232,74 @@ void c26_cart_focus_next(void)
     }
 }
 
+/* Titlebar / frame geometry, shared by the compositor and the hit tester so
+   the affordances a user clicks are exactly the ones that were drawn. */
+static int win_frame_w(const proc_t *p) { return p->win_w + 2 * BORDER; }
+static int win_frame_h(const proc_t *p)
+{
+    return p->minimized ? TITLE_HEIGHT + BORDER
+                        : p->win_h + TITLE_HEIGHT + BORDER;
+}
+
+static void close_box(const proc_t *p, int *bx, int *by)
+{
+    *bx = p->win_x + win_frame_w(p) - BORDER - BTN - BTN_PAD;
+    *by = p->win_y + (TITLE_HEIGHT - BTN) / 2;
+}
+
+static void min_box(const proc_t *p, int *bx, int *by)
+{
+    int cx, cy;
+    close_box(p, &cx, &cy);
+    *bx = cx - BTN - BTN_PAD;
+    *by = cy;
+}
+
+static void grip_box(const proc_t *p, int *gx, int *gy)
+{
+    *gx = p->win_x + win_frame_w(p) - GRIP;
+    *gy = p->win_y + win_frame_h(p) - GRIP;
+}
+
+static int in_box(int x, int y, int bx, int by, int w, int h)
+{
+    return x >= bx && x < bx + w && y >= by && y < by + h;
+}
+
+static void draw_button(int bx, int by, char glyph, uint32_t bg)
+{
+    c26_fill_rect(bx, by, BTN, BTN, bg);
+    c26_draw_char(bx + 2, by, glyph, 0xffffff, bg, 2);
+}
+
 static void blit_window(const proc_t *process, const uint32_t *surface)
 {
     uint32_t *pixels = c26_framebuffer_pixels();
     int content_x = process->win_x + BORDER;
     int content_y = process->win_y + TITLE_HEIGHT;
-    int frame_w = process->win_w + 2 * BORDER;
-    int frame_h = process->win_h + TITLE_HEIGHT + BORDER;
+    int frame_w = win_frame_w(process);
+    int frame_h = win_frame_h(process);
     int is_focused = process == &procs[focused >= 0 ? focused : 0] &&
                      focused >= 0;
+    uint32_t title_bg = is_focused ? 0x35409a : 0x222957;
 
     c26_draw_rect(process->win_x, process->win_y, frame_w, frame_h,
                   is_focused ? 0xffffff : 0x6570bd);
     c26_fill_rect(process->win_x + BORDER, process->win_y + BORDER,
-                  process->win_w, TITLE_HEIGHT - BORDER,
-                  is_focused ? 0x35409a : 0x222957);
+                  process->win_w, TITLE_HEIGHT - BORDER, title_bg);
     c26_draw_text(process->win_x + 8, process->win_y + 6, process->name,
-                  0xffffff, is_focused ? 0x35409a : 0x222957, 2);
+                  0xffffff, title_bg, 2);
+
+    /* Minimize/restore and close affordances, drawn over the title fill. */
+    int bx, by;
+    min_box(process, &bx, &by);
+    draw_button(bx, by, process->minimized ? '+' : '-', 0x555b8a);
+    close_box(process, &bx, &by);
+    draw_button(bx, by, 'X', 0xb03030);
+
+    if (process->minimized) {
+        return;
+    }
 
     for (int row = 0; row < process->win_h; row++) {
         int dst_y = content_y + row;
@@ -252,6 +312,14 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
                 surface[(unsigned int)row * C26_SCREEN_WIDTH +
                         (unsigned int)col];
         }
+    }
+
+    /* A resize grip: three diagonal ticks in the bottom-right corner. */
+    int gx, gy;
+    grip_box(process, &gx, &gy);
+    uint32_t grip_c = is_focused ? 0xffffff : 0x6570bd;
+    for (int i = 3; i < GRIP; i += 4) {
+        c26_draw_line(gx + i, gy + GRIP - 1, gx + GRIP - 1, gy + i, grip_c);
     }
 }
 
@@ -291,18 +359,37 @@ int c26_wm_click(int x, int y, int pressed)
 {
     if (!pressed) {
         dragging = -1;
+        resizing = -1;
         return 0;
     }
     for (int i = z_count - 1; i >= 0; i--) {
         int job = z_order[i];
         proc_t *process = &procs[job];
-        int frame_w = process->win_w + 2 * BORDER;
-        int frame_h = process->win_h + TITLE_HEIGHT + BORDER;
-        if (x < process->win_x || x >= process->win_x + frame_w ||
-            y < process->win_y || y >= process->win_y + frame_h) {
+        if (!in_box(x, y, process->win_x, process->win_y, win_frame_w(process),
+                    win_frame_h(process))) {
             continue;
         }
         focus_proc(job);
+        int bx, by;
+        close_box(process, &bx, &by);
+        if (in_box(x, y, bx, by, BTN, BTN)) {
+            c26_cart_kill(job);
+            return 1;
+        }
+        min_box(process, &bx, &by);
+        if (in_box(x, y, bx, by, BTN, BTN)) {
+            process->minimized = !process->minimized;
+            scene_dirty = 1;
+            return 1;
+        }
+        if (!process->minimized) {
+            int gx, gy;
+            grip_box(process, &gx, &gy);
+            if (in_box(x, y, gx, gy, GRIP, GRIP)) {
+                resizing = job;
+                return 1;
+            }
+        }
         if (y < process->win_y + TITLE_HEIGHT) {
             dragging = job;
             drag_dx = x - process->win_x;
@@ -316,9 +403,27 @@ int c26_wm_click(int x, int y, int pressed)
     return 0;
 }
 
+/* A window's content is [0,w) x [0,h) of its full-screen surface, so resizing
+   is just clamping win_w/win_h — no reallocation. Apps poll window_size() and
+   relayout on their next frame. */
+static void clamp_window_size(proc_t *process)
+{
+    int max_w = (int)C26_SCREEN_WIDTH - 2 * BORDER;
+    int max_h = (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT - BORDER;
+    if (process->win_w < MIN_WIN_W) process->win_w = MIN_WIN_W;
+    if (process->win_h < MIN_WIN_H) process->win_h = MIN_WIN_H;
+    if (process->win_w > max_w) process->win_w = max_w;
+    if (process->win_h > max_h) process->win_h = max_h;
+}
+
 void c26_wm_pointer_moved(int x, int y)
 {
-    if (dragging >= 0 && procs[dragging].state == PROC_RUNNABLE) {
+    if (resizing >= 0 && procs[resizing].state == PROC_RUNNABLE) {
+        proc_t *process = &procs[resizing];
+        process->win_w = x - (process->win_x + BORDER);
+        process->win_h = y - (process->win_y + TITLE_HEIGHT);
+        clamp_window_size(process);
+    } else if (dragging >= 0 && procs[dragging].state == PROC_RUNNABLE) {
         proc_t *process = &procs[dragging];
         process->win_x = x - drag_dx;
         process->win_y = y - drag_dy;
@@ -672,6 +777,10 @@ static void finalize(int index, long code)
     if (dragging == index) {
         dragging = -1;
     }
+    if (resizing == index) {
+        resizing = -1;
+    }
+    procs[index].minimized = 0;
     if (code == -3) {
         c26_puts("CART KILLED\n");
     }
@@ -752,6 +861,7 @@ int c26_cart_run(const char *name)
     process->win_h = WINDOW_DEFAULT_H;
     process->win_x = 80 + slot * 96;
     process->win_y = 60 + slot * 68;
+    process->minimized = 0;
     process->mail_head = 0;
     process->mail_tail = 0;
     process->state = PROC_RUNNABLE;
@@ -792,6 +902,30 @@ int c26_cart_focus(int job)
         return 0;
     }
     focus_proc(job);
+    return 1;
+}
+
+int c26_cart_resize_window(int job, int w, int h)
+{
+    if (job < 0 || job >= C26_NPROC || procs[job].state != PROC_RUNNABLE) {
+        return 0;
+    }
+    procs[job].win_w = w;
+    procs[job].win_h = h;
+    clamp_window_size(&procs[job]);
+    procs[job].minimized = 0;
+    procs[job].surface_damaged = 1;
+    scene_dirty = 1;
+    return 1;
+}
+
+int c26_cart_set_minimized(int job, int minimized)
+{
+    if (job < 0 || job >= C26_NPROC || procs[job].state != PROC_RUNNABLE) {
+        return 0;
+    }
+    procs[job].minimized = minimized ? 1 : 0;
+    scene_dirty = 1;
     return 1;
 }
 

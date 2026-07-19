@@ -133,6 +133,28 @@ console input, so a blocking `TCP`/`RESOLVE` cannot re-enter the line editor.
 Optional follow-ups: a BASIC `TCP "host",port` connect-by-name, and a
 `FETCH`/HTTP-get cartridge closing the built-in-language network surface.
 
+## Delivered: window management — resize, minimize, close (2026-07-19)
+
+Windows were movable only. The compositor (`src/cart.c`) now draws titlebar
+affordances — a minimize/restore box and a close box — plus a bottom-right
+resize grip, and the hit tester shares one set of geometry helpers with the
+drawing code so a click always lands on the affordance that was drawn.
+Minimized windows collapse to their title bar; resizing clamps `win_w/win_h`
+(the content is a window onto the app's full-screen surface, so no
+reallocation) and apps relayout on their next `window_size()` poll. BASIC
+gained `WINDOW SIZE j,w,h`, `WINDOW MIN/MAX j`, and `WINDOW CLOSE j` alongside
+the existing `WINDOW j,x,y` move, so every operation is scriptable — the smoke
+gate resizes, minimizes, restores, and closes a running cart's window and
+asserts that each step changes the composited framebuffer (FB checksums) and
+that the close terminates the job.
+
+Note on double buffering (backlog item): the machine renders into the single
+virtio-GPU scanout backing and only then issues `TRANSFER_TO_HOST_2D` +
+`RESOURCE_FLUSH`, which snapshots the frame atomically — the host never sees a
+half-drawn buffer. A second back buffer would add copies without removing any
+observable tearing, so it is deliberately not shipped rather than added as an
+unmotivated claim.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,
