@@ -50,6 +50,11 @@ int c26_cart_move_window(int job, int x, int y);
 int c26_cart_resize_window(int job, int w, int h);
 int c26_cart_set_minimized(int job, int minimized);
 int c26_cart_focus(int job);
+
+/* The system clipboard: one shared text buffer for copy/paste across apps. */
+void c26_clipboard_set(const char *data, unsigned int len);
+unsigned int c26_clipboard_get(char *buf, unsigned int cap);
+unsigned int c26_clipboard_length(void);
 int c26_cart_send(int job, const void *data, size_t size);
 void c26_cart_list_jobs(void);
 void c26_cart_focus_console(void);

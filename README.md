@@ -40,7 +40,9 @@ host operating system.
   the same operations from BASIC.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
-  across address spaces in the smoke gate.
+  across address spaces in the smoke gate. A shared system clipboard
+  (`clip_set`/`clip_get` syscalls, BASIC `CLIP`/`PASTE`, EDIT Ctrl-W/Ctrl-Y)
+  carries copy/paste text across the app boundary.
 - A UI toolkit (`apps/lib/ui.*`) and a real application suite built on it:
   `FILES` (browse, launch via the `spawn` syscall, delete, or open a file
   in the editor — the filename travels over IPC), `EDIT` (a windowed text

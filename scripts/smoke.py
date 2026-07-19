@@ -148,6 +148,11 @@ SECOND_BOOT_MARKERS = [
     "FILES CART ONLINE",
     "FILES SEES",
     "Error: not a c26 cartridge",
+    # Shared clipboard, both directions across the app boundary.
+    "PASTE COPYME",   # BASIC round-trip through the kernel clipboard
+    "EDIT PASTE 5",   # cart clip_get read what BASIC set ("PIECE")
+    "EDIT COPY 5",    # cart clip_set wrote the current line
+    "PASTE PIECE",    # BASIC read what EDIT copied
     "92002",
     "SHUTTING DOWN - GOODBYE",
 ]
@@ -388,6 +393,17 @@ SECOND_BOOT_STAGES = [
     ('dir\nrun "files"\n', 3.0),
     ('r', 2.0),                # R on the first entry (DEMO): spawn error path
     ('q', 2.0),                # quit FILES
+    # Shared clipboard: a BASIC round-trip, then copy/paste crossing the app
+    # boundary in both directions — BASIC sets the clipboard and EDIT pastes
+    # it (Ctrl-Y, clip_get syscall), then EDIT copies a line (Ctrl-W,
+    # clip_set syscall) and BASIC pastes what the app copied.
+    ('clip "COPYME"\n', 2.0),
+    ('paste\n', 2.0),              # PASTE COPYME (BASIC set -> BASIC get)
+    ('delete notes\nclip "PIECE"\nrun "edit"\n', 3.0),
+    ('\x19', 2.0),                 # Ctrl-Y: EDIT reads BASIC's clip -> EDIT PASTE 5
+    ('\x17', 2.0),                 # Ctrl-W: EDIT copies the line -> EDIT COPY 5
+    ('\x11', 2.0),                 # Ctrl-Q quits the editor
+    ('\x14paste\n', 2.0),          # PASTE PIECE (BASIC reads EDIT's clip)
     ('print 92000+2\nbye\n', 4.0),  # the machine powers itself off
 ]
 
@@ -530,7 +546,8 @@ def main() -> int:
           "higher-order DEMO.SCM driving the desktop), graphics, sound, "
           "C26FS v2, two-boot persistence, multiprocessing U-mode cartridges "
           "(contained fault, preemptive kill, concurrent job), windows + "
-          "IPC with resize/minimize/close window management, FILES/EDIT with "
+          "IPC with resize/minimize/close window management and a shared "
+          "clipboard (copy/paste across apps), FILES/EDIT with "
           "spawn, a real UDP round trip, a kernel TCP "
           "client handshaking with a scripted host peer over guestfwd, DNS "
           "resolution, and a guest-initiated power-off")

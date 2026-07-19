@@ -155,6 +155,18 @@ half-drawn buffer. A second back buffer would add copies without removing any
 observable tearing, so it is deliberately not shipped rather than added as an
 unmotivated claim.
 
+## Delivered: a shared clipboard — copy/paste across apps (2026-07-19)
+
+One kernel-held text buffer (`src/cart.c`) is the system clipboard, reachable
+three ways: the ABI grew `clip_set`/`clip_get` (v3) so U-mode cartridges copy
+and paste through the syscall seam; BASIC gained `CLIP "text"` and `PASTE`;
+and EDIT binds Ctrl-W (copy the current line) and Ctrl-Y (paste at the
+cursor). Because every path reads and writes the same buffer, copy/paste
+crosses the app boundary. The smoke gate proves both directions headlessly: a
+BASIC round-trip, then EDIT pasting what BASIC copied (`clip_get` reads the
+5-byte "PIECE"), then EDIT copying a line that BASIC's `PASTE` reads back
+(`clip_set`). The stub page stayed within its single 4 KiB page.
+
 ## Delivered follow-ups (foundation is done)
 
 - **BASIC string variables + EDIT (2026-07-17).** A$..Z$ with assignment,

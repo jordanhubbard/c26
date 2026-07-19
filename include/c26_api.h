@@ -99,6 +99,15 @@ typedef struct {
                     const void *data, size_t size);
     int (*udp_recv)(uint16_t port, uint32_t *from_ip, uint16_t *from_port,
                     void *data, size_t capacity);
+
+    /* --- version 3: the shared clipboard --- */
+
+    /* clip_set copies up to 256 bytes into the one system clipboard; clip_get
+       copies up to `capacity` bytes out and returns the byte count. Any app,
+       or BASIC via CLIP/PASTE, reads what another wrote — copy/paste that
+       crosses the app boundary. */
+    int (*clip_set)(const void *data, size_t size);
+    int (*clip_get)(void *data, size_t capacity);
 } c26_api_t;
 
 /* Arrow keys are delivered through getchar() as these codes. */

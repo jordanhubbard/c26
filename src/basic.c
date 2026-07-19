@@ -1427,6 +1427,31 @@ static exec_t exec_statement(const char *text, long pc)
         }
         return ok_next();
     }
+    if (keyword(line, "CLIP")) {
+        const char *cursor = c26_skip_spaces(line + 4);
+        if (*cursor != '"') return fail("SYNTAX");
+        cursor++;
+        char textbuf[256];
+        size_t n = 0;
+        while (*cursor != '\0' && *cursor != '"' && n < sizeof(textbuf)) {
+            textbuf[n++] = *cursor++;
+        }
+        if (*cursor != '"') return fail("SYNTAX");
+        c26_clipboard_set(textbuf, (unsigned int)n);
+        c26_puts("CLIP SET ");
+        c26_put_uint(n);
+        c26_putc('\n');
+        return ok_next();
+    }
+    if (keyword(line, "PASTE")) {
+        char textbuf[257];
+        unsigned int n = c26_clipboard_get(textbuf, sizeof(textbuf) - 1);
+        textbuf[n] = '\0';
+        c26_puts("PASTE ");
+        c26_puts(textbuf);
+        c26_putc('\n');
+        return ok_next();
+    }
     if (keyword(line, "LET")) {
         p.cursor = line + 3;
         return exec_assign(&p);
@@ -1795,6 +1820,7 @@ static void process_line(const char *line)
         c26_puts("PRINT LET INPUT GET IF THEN GOTO GOSUB RETURN FOR NEXT END REM PAUSE\n");
         c26_puts("SCREEN CLS COLOR PLOT LINE RECT TEXT SOUND DEVICE PEEK POKE ROBOT\n");
         c26_puts("DESKTOP: WINDOW J,X,Y | SIZE J,W,H | MIN/MAX J | CLOSE J  FOCUS J  SEND J,\"MSG\"\n");
+        c26_puts("CLIP \"TEXT\"  PASTE   (shared clipboard, also Ctrl-W/Ctrl-Y in EDIT)\n");
         c26_puts("LIST EDIT RUN NEW DIR SAVE LOAD DELETE RENAME RUN NAME JOBS KILL BYE HELP\n");
         c26_puts("STRINGS: A$=\"TEXT\"  PRINT A$  INPUT A$  IF A$=\"X\" THEN\n");
         c26_puts("FUNCTIONS: RND ABS PEEK TI FB TIME  STRINGS: TIME$\n");

@@ -149,6 +149,21 @@ int c26_cart_kill(int job) { (void)job; return 0; }
 int c26_cart_move_window(int j, int x, int y) { (void)j;(void)x;(void)y; return 0; }
 int c26_cart_resize_window(int j, int w, int h) { (void)j;(void)w;(void)h; return 0; }
 int c26_cart_set_minimized(int j, int m) { (void)j;(void)m; return 0; }
+static char shim_clip[256];
+static unsigned int shim_clip_len;
+void c26_clipboard_set(const char *d, unsigned int len)
+{
+    if (len > sizeof(shim_clip)) len = sizeof(shim_clip);
+    for (unsigned int i = 0; i < len; i++) shim_clip[i] = d[i];
+    shim_clip_len = len;
+}
+unsigned int c26_clipboard_get(char *b, unsigned int cap)
+{
+    unsigned int n = shim_clip_len < cap ? shim_clip_len : cap;
+    for (unsigned int i = 0; i < n; i++) b[i] = shim_clip[i];
+    return n;
+}
+unsigned int c26_clipboard_length(void) { return shim_clip_len; }
 int c26_cart_focus(int j) { (void)j; return 0; }
 int c26_cart_send(int j, const void *d, size_t s) { (void)j;(void)d;(void)s; return 0; }
 void c26_cart_list_jobs(void) { c26_puts("  (NO JOBS)\n"); }

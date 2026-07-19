@@ -94,6 +94,28 @@ static int drag_dx;
 static int drag_dy;
 static int resizing = -1;
 
+/* The system clipboard: one shared text buffer any app (or BASIC via
+   CLIP/PASTE) reads and writes, so copy/paste crosses the app boundary. */
+#define CLIPBOARD_MAX 256
+static char clipboard[CLIPBOARD_MAX];
+static unsigned int clipboard_len;
+
+void c26_clipboard_set(const char *data, unsigned int len)
+{
+    if (len > CLIPBOARD_MAX) len = CLIPBOARD_MAX;
+    for (unsigned int i = 0; i < len; i++) clipboard[i] = data[i];
+    clipboard_len = len;
+}
+
+unsigned int c26_clipboard_get(char *buf, unsigned int cap)
+{
+    unsigned int n = clipboard_len < cap ? clipboard_len : cap;
+    for (unsigned int i = 0; i < n; i++) buf[i] = clipboard[i];
+    return n;
+}
+
+unsigned int c26_clipboard_length(void) { return clipboard_len; }
+
 /* ------------------------------------------------------------------ */
 /* Surface primitives (draw into a process surface, clipped)           */
 
@@ -650,6 +672,20 @@ static long do_syscall(c26_user_frame_t *frame)
         if (a0 != 0) *(uint32_t *)pw = (uint32_t)process->win_w;
         if (a1 != 0) *(uint32_t *)ph = (uint32_t)process->win_h;
         return 0;
+    }
+    case C26_SYS_CLIP_SET: {
+        unsigned int len = (unsigned int)a1;
+        if (len > CLIPBOARD_MAX) len = CLIPBOARD_MAX;
+        uintptr_t p = user_ptr(a0, len == 0 ? 1 : len, 0);
+        if (p == 0) break;
+        c26_clipboard_set((const char *)p, len);
+        return (long)len;
+    }
+    case C26_SYS_CLIP_GET: {
+        unsigned int cap = (unsigned int)a1;
+        uintptr_t p = user_ptr(a0, cap == 0 ? 1 : cap, 1);
+        if (p == 0) break;
+        return (long)c26_clipboard_get((char *)p, cap);
     }
     case C26_SYS_SEND: {
         int target = (int)(int64_t)a0;

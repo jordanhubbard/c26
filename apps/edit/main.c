@@ -2,7 +2,8 @@
  * the first half second (FILES sends one), that file is opened; otherwise
  * it edits NOTES. Arrows (or Ctrl-P/N/B/F) move, printable keys insert,
  * Backspace deletes, Enter breaks lines, Ctrl-S saves, Ctrl-Q or Esc
- * quits. */
+ * quits. Ctrl-W copies the current line to the shared clipboard and Ctrl-Y
+ * pastes it — copy/paste that crosses into other apps and BASIC's PASTE. */
 
 #include "ui.h"
 
@@ -103,6 +104,30 @@ static void erase(void)
     length--;
 }
 
+/* Copy the line containing the cursor to the system clipboard (Ctrl-W). */
+static void copy_line(const c26_api_t *api)
+{
+    int start = cursor;
+    while (start > 0 && text[start - 1] != '\n') start--;
+    int end = cursor;
+    while (end < length && text[end] != '\n') end++;
+    int n = api->clip_set(text + start, (size_t)(end - start));
+    api->puts("EDIT COPY ");
+    api->put_int(n);
+    api->putc('\n');
+}
+
+/* Paste the clipboard at the cursor (Ctrl-Y). */
+static void paste_clip(const c26_api_t *api)
+{
+    char buf[256];
+    int n = api->clip_get(buf, sizeof(buf));
+    for (int i = 0; i < n; i++) insert(buf[i]);
+    api->puts("EDIT PASTE ");
+    api->put_int(n);
+    api->putc('\n');
+}
+
 static void move_line(int delta)
 {
     int line;
@@ -167,6 +192,18 @@ int app_main(const c26_api_t *api)
             } else {
                 redraw(api, "SAVE FAILED", UI_WARN);
             }
+            ui_flush(&ui);
+            continue;
+        }
+        if (key == 0x17) { /* Ctrl-W: copy current line */
+            copy_line(api);
+            redraw(api, "COPIED", UI_GOOD);
+            ui_flush(&ui);
+            continue;
+        }
+        if (key == 0x19) { /* Ctrl-Y: paste clipboard */
+            paste_clip(api);
+            redraw(api, "PASTED", UI_GOOD);
             ui_flush(&ui);
             continue;
         }
