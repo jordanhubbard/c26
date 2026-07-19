@@ -355,20 +355,42 @@ in the smoke run (launch → drive → read a marker → quit):
 
 # Backlog (2026-07-17 stopping point)
 
-**Status (2026-07-19): worked through.** Everything below has since shipped and
-is gated by `make check` — a second built-in language (Scheme), real TCP + DNS,
-window management + dock + clipboard, BASIC depth (strings, arrays, DEF FN,
-DATA/READ), CI, a faster smoke gate, a six-app suite, an RV64 disassembler, a
-richer assembler, and a self-hosting tiny-C compiler — as recorded in the
-"Delivered" sections above. The only items deliberately declined are the
-double-buffered present and C26FS subdirectories (both unnecessary, with
-rationale above), and the optional `FETCH` app / uIP port under networking.
+**Status (2026-07-19): complete — every backlog item is shipped or explicitly
+declined.** What shipped, all gated by `make check` and enforced by CI on every
+push:
 
-The charted course (M1–M7) is complete: a memory-protected, preemptively
-multitasking, windowed, networked, self-hosting home computer that boots to
-READY in under a second. What follows is the original prioritized backlog,
-kept for the record. Every item preserved the invariant that one person can
-read the whole machine and that `make check` gates every capability headlessly.
+- **Networking:** a bespoke kernel TCP client and DNS resolver, gated
+  deterministically through QEMU `guestfwd` + a scripted host peer; BASIC
+  `TCP`/`RESOLVE`; TCP/DNS cartridge syscalls (ABI v5); and the `FETCH`
+  HTTP-get app — UDP, TCP, DNS, and HTTP reach both the built-in language and
+  the cartridge layer.
+- **BASIC depth:** string functions (`LEN`/`LEFT$`/`RIGHT$`/`MID$`/`CHR$`/
+  `ASC`/`VAL`/`STR$`), arrays (`DIM`), user functions (`DEF FN`), and
+  `DATA`/`READ`/`RESTORE`.
+- **Windowing + desktop:** window resize/minimize/close, a graphical dock,
+  clipboard copy/paste across apps, and synthetic pointer input.
+- **Dev tools:** a richer assembler (macros, `.INCLUDE`, expression operands),
+  an RV64 disassembler (`MONITOR`), and a self-hosting tiny-C compiler.
+- **Apps:** calculator, clock, hex editor, spreadsheet, robot panel, and a
+  game (snake) — a six-app suite on the UI toolkit.
+- **Infrastructure:** CI running `make check` on every push, and a faster
+  (~2 min) marker-paced smoke gate.
+- Plus a second built-in language delivered earlier — **c26 Scheme** — and a
+  consolidation review pass that hardened all of the above.
+
+**Deliberately declined (honest decisions, not gaps):** double-buffered present
+(the scanout is snapshotted atomically, so there is no tearing to remove),
+C26FS subdirectories (a flat 64-file store stays legible), and the uIP/lwIP
+port (a readable bespoke stack already exists; importing an unreadable one
+would violate the machine's guiding principle). Rationale for each is in the
+"Delivered"/decision sections above.
+
+The charted course (M1–M7) plus this entire backlog is complete: a
+memory-protected, preemptively multitasking, windowed, networked, self-hosting
+home computer that boots to READY in under a second, programmable in BASIC,
+Scheme, C, and assembly, and still small enough that one person can read the
+whole machine — with `make check` gating every capability headlessly. What
+follows is the original prioritized backlog, kept for the record.
 
 ## 1. Networking — the open design decision (highest value, needs a choice)
 
