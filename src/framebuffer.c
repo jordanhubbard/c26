@@ -148,7 +148,11 @@ int c26_framebuffer_init(void)
     gpu_online = gpu_initialize();
     c26_puts("FRAMEBUFFER: ");
     c26_puts(c26_framebuffer_backend());
-    c26_puts(" 640x480x32\n");
+    c26_putc(' ');
+    c26_put_uint(C26_SCREEN_WIDTH);
+    c26_putc('x');
+    c26_put_uint(C26_SCREEN_HEIGHT);
+    c26_puts("x32\n");
     return gpu_online;
 }
 
