@@ -96,11 +96,16 @@ static obj_t unspec_obj = {T_UNSPEC, {{0, 0}}};
 #define SYMBOL_MAX 4096
 
 static obj_t arena[ARENA_OBJECTS];
-static unsigned int arena_top;
+static int free_next[ARENA_OBJECTS]; /* free-list links (by index) */
+static int free_head;
+static unsigned char marks[ARENA_OBJECTS];
 static char string_pool[STRING_POOL_BYTES];
 static unsigned int string_pool_top;
 static value symbols[SYMBOL_MAX];
 static unsigned int symbol_count;
+static value global_env; /* a GC root; defined during scm_init */
+static char *stack_bottom;
+static unsigned int gc_cycles;
 
 static void (*output)(const char *);
 
@@ -113,12 +118,107 @@ static void scm_error(const char *message)
     longjmp(error_jump, 1);
 }
 
+/* --- Garbage collector: conservative mark-sweep -------------------- *
+ *
+ * Non-moving, so values held in C locals stay valid — we find them by
+ * scanning the C stack (and spilled registers) for word-aligned bit
+ * patterns that land exactly on an arena slot. Conservative scanning can
+ * only ever RETAIN a false positive; it can never free a live object or
+ * corrupt one, because nothing moves. Immediate fixnums have their low bit
+ * set, so they are never mistaken for aligned object pointers, and the
+ * singletons live outside the arena, so they are ignored. Precise roots
+ * (the global environment and the permanent symbol table) are marked
+ * directly. Marking iterates down cdr/env chains and only recurses on
+ * car/params/body, so a million-element list marks without deep recursion.
+ */
+
+static void arena_init(void)
+{
+    for (int i = 0; i < ARENA_OBJECTS - 1; i++) free_next[i] = i + 1;
+    free_next[ARENA_OBJECTS - 1] = -1;
+    free_head = 0;
+}
+
+static int in_arena(value v)
+{
+    if (!IS_OBJ(v)) return 0;
+    obj_t *o = OBJ(v);
+    if (o < arena || o >= arena + ARENA_OBJECTS) return 0;
+    return ((char *)o - (char *)arena) % (long)sizeof(obj_t) == 0;
+}
+
+static void mark(value v)
+{
+mark_loop:
+    if (!in_arena(v)) return;
+    int i = (int)(OBJ(v) - arena);
+    if (marks[i]) return;
+    marks[i] = 1;
+    obj_t *o = &arena[i];
+    switch (o->type) {
+    case T_PAIR:
+        mark(o->as.pair.car);
+        v = o->as.pair.cdr;
+        goto mark_loop;
+    case T_CLOSURE:
+        mark(o->as.closure.params);
+        mark(o->as.closure.body);
+        v = o->as.closure.env;
+        goto mark_loop;
+    default:
+        return;
+    }
+}
+
+static void mark_range(char *lo, char *hi)
+{
+    if (lo > hi) {
+        char *tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
+    /* Align the low end up to a value boundary. */
+    while (((uintptr_t)lo % sizeof(value)) != 0) lo++;
+    for (char *p = lo; p + sizeof(value) <= hi; p += sizeof(value)) {
+        mark(*(value *)p);
+    }
+}
+
+static void gc(void)
+{
+    jmp_buf registers;
+    (void)setjmp(registers); /* spill callee-saved registers to the stack */
+
+    for (int i = 0; i < ARENA_OBJECTS; i++) marks[i] = 0;
+
+    /* Precise roots. */
+    mark(global_env);
+    for (unsigned int i = 0; i < symbol_count; i++) mark(symbols[i]);
+
+    /* Conservative roots: spilled registers + the live C stack. */
+    char probe;
+    mark_range((char *)registers, (char *)registers + sizeof(registers));
+    mark_range(&probe, stack_bottom);
+
+    /* Sweep: rebuild the free list from every unmarked slot. */
+    free_head = -1;
+    for (int i = ARENA_OBJECTS - 1; i >= 0; i--) {
+        if (marks[i]) continue;
+        free_next[i] = free_head;
+        free_head = i;
+    }
+    gc_cycles++;
+}
+
 static obj_t *allocate(obj_type type)
 {
-    if (arena_top == ARENA_OBJECTS) {
-        scm_error("out of object memory (GC not yet implemented)");
+    if (free_head == -1) {
+        gc();
+        if (free_head == -1) scm_error("out of object memory");
     }
-    obj_t *o = &arena[arena_top++];
+    int i = free_head;
+    free_head = free_next[i];
+    obj_t *o = &arena[i];
     o->type = type;
     return o;
 }
@@ -449,8 +549,6 @@ static void write_value(value v, int display)
 
 /* ------------------------------------------------------------------ */
 /* Environments: frame chain. env = (frame . parent), frame = alist.   */
-
-static value global_env;
 
 static value make_env(value parent)
 {
@@ -875,18 +973,20 @@ void scm_set_output(void (*sink)(const char *))
 
 void scm_reset(void)
 {
-    arena_top = 0;
-    string_pool_top = 0;
-    symbol_count = 0;
     scm_init();
 }
 
 void scm_init(void)
 {
     if (output == NULL) output = default_output;
-    arena_top = 0;
+    arena_init();
     string_pool_top = 0;
     symbol_count = 0;
+    gc_cycles = 0;
+    /* A default stack anchor so an allocation before the first
+       scm_eval_string still has a valid (if conservative) scan range. */
+    char anchor;
+    stack_bottom = &anchor;
 
     sym_quote = intern("quote", 5);
     sym_if = intern("if", 2);
@@ -937,6 +1037,11 @@ void scm_init(void)
 
 int scm_eval_string(const char *src, int echo)
 {
+    /* Anchor the conservative stack scan at this outermost eval frame, so a
+       GC triggered deep in eval() scans every live temporary above it. */
+    char anchor;
+    stack_bottom = &anchor;
+
     if (setjmp(error_jump)) {
         emit("ERROR: ");
         emit(error_message);

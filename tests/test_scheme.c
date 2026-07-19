@@ -102,6 +102,31 @@ int main(void)
           "(fib 15)",
           "610", "tree recursion");
 
+    /* Garbage collection: these exceed the arena and force many GC cycles.
+       If any conservative root were missed, results would corrupt and the
+       expected substring would not appear. */
+    check("(define (loop i acc)"
+          "  (if (= i 0) acc (loop (- i 1) (+ acc 1))))"
+          "(loop 200000 0)",
+          "200000", "200k tail loop across many GCs");
+    check("(define (sum n acc) (if (= n 0) acc (sum (- n 1) (+ acc n))))"
+          "(sum 5000 0)",
+          "12502500", "GC-heavy accumulation stays correct");
+    /* Build and discard huge garbage lists, then verify a later computation
+       is unaffected (the arena is reused after collection). */
+    check("(define (build n) (if (= n 0) '() (cons n (build (- n 1)))))"
+          "(car (build 3000))"
+          "(car (build 3000))"
+          "(+ 2 2)",
+          "4", "garbage lists collected, later work correct");
+    /* Interned symbols must survive collection (they are permanent roots);
+       a value bound to one before the GC is still reachable after. */
+    check("(define keep 'important)"
+          "(define (churn n) (if (= n 0) 'done (begin (list n n n) (churn (- n 1)))))"
+          "(churn 30000)"
+          "keep",
+          "important", "bound symbol survives GC churn");
+
     /* Higher-order: build map from primitives, use it */
     check("(define (map f xs)"
           "  (if (null? xs) '() (cons (f (car xs)) (map f (cdr xs)))))"
