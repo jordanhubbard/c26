@@ -3,8 +3,10 @@
 
 #include <stdint.h>
 
-#define C26_CONSOLE_COLS 100U
-#define C26_CONSOLE_ROWS 42U
+#define C26_CONSOLE_COLS 106U
+#define C26_CONSOLE_ROWS 43U
+#define C26_CONSOLE_CELL_W 12
+#define C26_CONSOLE_CELL_H 20
 
 typedef enum {
     C26_SCREEN_CONSOLE = 0,
@@ -17,8 +19,9 @@ void c26_console_clear(void);
 void c26_console_putc(char ch);
 void c26_console_render(void);
 void c26_console_render_cells(void); /* to the framebuffer, no present */
-/* Blit the console text into a window content area at pixel (ox, oy). */
-void c26_console_blit(int ox, int oy);
+/* Blit the console text into a window content area of max_w x max_h at (ox,oy),
+   bottom-anchored so the prompt stays visible when the window is small. */
+void c26_console_blit(int ox, int oy, int max_w, int max_h);
 /* Content pixel size of the console text grid (for window sizing). */
 int c26_console_pixel_width(void);
 int c26_console_pixel_height(void);

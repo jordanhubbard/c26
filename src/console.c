@@ -78,25 +78,39 @@ int c26_console_pixel_height(void)
     return (int)C26_CONSOLE_ROWS * CONSOLE_CELL_HEIGHT;
 }
 
-/* Draw the console text grid into a window content area at pixel (ox, oy).
-   The caller (compositor) owns the surrounding window frame and background. */
-void c26_console_blit(int ox, int oy)
+/* Draw the console text into a window content area of max_w x max_h pixels at
+   (ox, oy). The view is bottom-anchored — it shows the last rows that fit, so
+   the prompt stays visible when the window is resized smaller than the grid. */
+void c26_console_blit(int ox, int oy, int max_w, int max_h)
 {
-    c26_fill_rect(ox, oy, c26_console_pixel_width(), c26_console_pixel_height(),
+    int cols = max_w / CONSOLE_CELL_WIDTH;
+    int rows = max_h / CONSOLE_CELL_HEIGHT;
+    if (cols > (int)C26_CONSOLE_COLS) cols = C26_CONSOLE_COLS;
+    if (rows > (int)C26_CONSOLE_ROWS) rows = C26_CONSOLE_ROWS;
+    if (cols < 1) cols = 1;
+    if (rows < 1) rows = 1;
+    int first = (int)C26_CONSOLE_ROWS - rows; /* bottom-anchored viewport */
+    if (first < 0) first = 0;
+    c26_fill_rect(ox, oy, cols * CONSOLE_CELL_WIDTH, rows * CONSOLE_CELL_HEIGHT,
                   CONSOLE_BG);
-    for (unsigned int row = 0; row < C26_CONSOLE_ROWS; row++) {
-        for (unsigned int col = 0; col < C26_CONSOLE_COLS; col++) {
-            if (cells[row][col] != ' ') {
-                c26_draw_char(ox + (int)col * CONSOLE_CELL_WIDTH,
-                              oy + (int)row * CONSOLE_CELL_HEIGHT,
-                              cells[row][col], CONSOLE_FG, CONSOLE_BG,
+    for (int row = 0; row < rows; row++) {
+        int src = first + row;
+        for (int col = 0; col < cols; col++) {
+            if (cells[src][col] != ' ') {
+                c26_draw_char(ox + col * CONSOLE_CELL_WIDTH,
+                              oy + row * CONSOLE_CELL_HEIGHT,
+                              cells[src][col], CONSOLE_FG, CONSOLE_BG,
                               CONSOLE_FONT_SCALE);
             }
         }
     }
-    c26_fill_rect(ox + (int)cursor_col * CONSOLE_CELL_WIDTH,
-                  oy + (int)cursor_row * CONSOLE_CELL_HEIGHT,
-                  CONSOLE_CELL_WIDTH - 2, CONSOLE_CELL_HEIGHT - 4, CONSOLE_FG);
+    int crow = (int)cursor_row - first;
+    if (crow >= 0 && crow < rows && (int)cursor_col < cols) {
+        c26_fill_rect(ox + (int)cursor_col * CONSOLE_CELL_WIDTH,
+                      oy + crow * CONSOLE_CELL_HEIGHT,
+                      CONSOLE_CELL_WIDTH - 2, CONSOLE_CELL_HEIGHT - 4,
+                      CONSOLE_FG);
+    }
     dirty = 0;
 }
 
@@ -106,7 +120,8 @@ void c26_console_render_cells(void)
 {
     c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, (int)C26_SCREEN_HEIGHT,
                   CONSOLE_BG);
-    c26_console_blit(CONSOLE_ORIGIN_X, CONSOLE_ORIGIN_Y);
+    c26_console_blit(CONSOLE_ORIGIN_X, CONSOLE_ORIGIN_Y,
+                     c26_console_pixel_width(), c26_console_pixel_height());
 }
 
 void c26_console_render(void)

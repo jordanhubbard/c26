@@ -102,13 +102,18 @@ static int drag_dx;
 static int drag_dy;
 static int resizing = -1;
 
-/* The BASIC console is itself a window on the unified desktop: a movable,
-   focusable frame (never closed — it is the shell) that app windows float
-   over. focused < 0 means the console window has keyboard focus. */
-#define DESKTOP_BG 0x161c3aU
-static int con_x = 24;
-static int con_y = 40;
+/* The BASIC console is itself a full window on the desktop: movable, resizable,
+   minimizable, zoomable — the same controls as any app — but never closed (it
+   is the shell). focused < 0 means the console window has keyboard focus. */
+static int con_x = 4;
+static int con_y = MENU_H + 4;
+static int con_w; /* content pixel size; lazily filled to the grid size */
+static int con_h;
+static int con_min;
+static int con_zoom;
+static int con_sx, con_sy, con_sw, con_sh; /* geometry saved before zoom */
 static int con_dragging;
+static int con_resizing;
 static int con_drag_dx;
 static int con_drag_dy;
 
@@ -397,11 +402,52 @@ static int in_box(int x, int y, int bx, int by, int w, int h)
     return x >= bx && x < bx + w && y >= by && y < by + h;
 }
 
-/* A rounded traffic-light dot (a filled square with its corners knocked out). */
+/* A round traffic-light dot: a filled disc approximated by stacked rows. */
 static void draw_dot(int bx, int by, uint32_t color)
 {
-    c26_fill_rect(bx + 1, by, DOT - 2, DOT, color);
-    c26_fill_rect(bx, by + 1, DOT, DOT - 2, color);
+    static const int inset[DOT] = {5, 3, 2, 1, 1, 0, 0, 0, 0, 1, 1, 2, 3, 5};
+    for (int r = 0; r < DOT; r++) {
+        int in = inset[r];
+        c26_fill_rect(bx + in, by + r, DOT - 2 * in, 1, color);
+    }
+}
+
+static int str_pixels(const char *s) { int n = 0; while (s[n]) n++; return n * 12; }
+
+/* Shared window chrome: drop shadow, frame, gradient-ish title bar, three
+   macOS traffic lights on the left, a centred title. Content and the resize
+   grip are drawn by the caller afterwards. */
+static void draw_chrome(int wx, int wy, int cw, int frame_h, const char *title,
+                        int focused, int show_close)
+{
+    int frame_w = cw + 2 * BORDER;
+    uint32_t title_bg = focused ? 0x2b3475 : 0x1b2350;
+    uint32_t edge = focused ? 0xd7ddffU : 0x4a5599U;
+    /* soft drop shadow down-right */
+    c26_fill_rect(wx + 5, wy + 5, frame_w, frame_h, 0x070a1c);
+    c26_draw_rect(wx, wy, frame_w, frame_h, edge);
+    c26_fill_rect(wx + BORDER, wy + BORDER, cw, TITLE_HEIGHT - BORDER, title_bg);
+    c26_fill_rect(wx + BORDER, wy + BORDER, cw, 2,
+                  focused ? 0x3c4699 : 0x232c63); /* title highlight */
+    int dy = wy + (TITLE_HEIGHT - DOT) / 2;
+    int d0 = wx + BORDER + DOT_LEFT;
+    draw_dot(d0, dy, focused ? (show_close ? COL_CLOSE : 0x6b6f8a) : 0x6b6f8a);
+    draw_dot(d0 + (DOT + DOT_GAP), dy, focused ? COL_MIN : 0x6b6f8a);
+    draw_dot(d0 + 2 * (DOT + DOT_GAP), dy, focused ? COL_ZOOM : 0x6b6f8a);
+    int tx = wx + frame_w / 2 - str_pixels(title) / 2;
+    int dots_right = d0 + 3 * (DOT + DOT_GAP) + 6;
+    if (tx < dots_right) tx = dots_right;
+    c26_draw_text(tx, wy + 6, title, focused ? 0xffffff : 0x9aa4d8, title_bg, 2);
+}
+
+static void draw_grip(int wx, int wy, int frame_w, int frame_h, int focused)
+{
+    int gx = wx + frame_w - GRIP;
+    int gy = wy + frame_h - GRIP;
+    uint32_t gc = focused ? 0xd7ddffU : 0x5560a0U;
+    for (int i = 2; i < GRIP; i += 3) {
+        c26_draw_line(gx + i, gy + GRIP - 1, gx + GRIP - 1, gy + i, gc);
+    }
 }
 
 static void blit_window(const proc_t *process, const uint32_t *surface)
@@ -413,24 +459,9 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
     int frame_h = win_frame_h(process);
     int is_focused = process == &procs[focused >= 0 ? focused : 0] &&
                      focused >= 0;
-    uint32_t title_bg = is_focused ? 0x35409a : 0x222957;
 
-    c26_draw_rect(process->win_x, process->win_y, frame_w, frame_h,
-                  is_focused ? 0xffffff : 0x6570bd);
-    c26_fill_rect(process->win_x + BORDER, process->win_y + BORDER,
-                  process->win_w, TITLE_HEIGHT - BORDER, title_bg);
-
-    /* macOS-style traffic lights on the left; the title follows them. */
-    int bx, by;
-    close_box(process, &bx, &by);
-    draw_dot(bx, by, is_focused ? COL_CLOSE : 0x6b6f8a);
-    min_box(process, &bx, &by);
-    draw_dot(bx, by, is_focused ? COL_MIN : 0x6b6f8a);
-    zoom_box(process, &bx, &by);
-    draw_dot(bx, by, is_focused ? COL_ZOOM : 0x6b6f8a);
-    zoom_box(process, &bx, &by);
-    c26_draw_text(bx + DOT + 12, process->win_y + 6, process->name,
-                  0xffffff, title_bg, 2);
+    draw_chrome(process->win_x, process->win_y, process->win_w, frame_h,
+                process->name, is_focused, 1);
 
     if (process->minimized) {
         return;
@@ -449,13 +480,7 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
         }
     }
 
-    /* A resize grip: three diagonal ticks in the bottom-right corner. */
-    int gx, gy;
-    grip_box(process, &gx, &gy);
-    uint32_t grip_c = is_focused ? 0xffffff : 0x6570bd;
-    for (int i = 3; i < GRIP; i += 4) {
-        c26_draw_line(gx + i, gy + GRIP - 1, gx + GRIP - 1, gy + i, grip_c);
-    }
+    draw_grip(process->win_x, process->win_y, frame_w, frame_h, is_focused);
 }
 
 void c26_compositor_mark_dirty(void)
@@ -463,11 +488,19 @@ void c26_compositor_mark_dirty(void)
     scene_dirty = 1;
 }
 
-/* Geometry of the console window (the BASIC shell), matching an app window. */
-static int con_frame_w(void) { return c26_console_pixel_width() + 2 * BORDER; }
+/* Console window geometry (pixel content con_w x con_h, lazily initialised). */
+static void con_ensure_size(void)
+{
+    if (con_w == 0) {
+        con_w = c26_console_pixel_width();
+        con_h = c26_console_pixel_height();
+    }
+}
+static int con_frame_w(void) { con_ensure_size(); return con_w + 2 * BORDER; }
 static int con_frame_h(void)
 {
-    return c26_console_pixel_height() + TITLE_HEIGHT + BORDER;
+    con_ensure_size();
+    return con_min ? TITLE_HEIGHT + BORDER : con_h + TITLE_HEIGHT + BORDER;
 }
 
 /* A vertical gradient wallpaper — the C64-meets-macOS desktop. */
@@ -511,18 +544,16 @@ static void draw_menu_bar(void)
     c26_draw_text((int)C26_SCREEN_WIDTH - 70, 6, clk, 0xbac4ff, 0x0d1233, 2);
 }
 
-/* Draw the console as a framed, focus-aware window and blit its text inside. */
+/* The console as a first-class window: the same chrome as an app (minimize,
+   zoom, resize, move), only the red close is inert — it is the shell. */
 static void draw_console_window(void)
 {
-    int cw = c26_console_pixel_width();
+    con_ensure_size();
     int is_focused = focused < 0;
-    uint32_t title_bg = is_focused ? 0x35409a : 0x222957;
-    c26_draw_rect(con_x, con_y, con_frame_w(), con_frame_h(),
-                  is_focused ? 0xffffff : 0x6570bd);
-    c26_fill_rect(con_x + BORDER, con_y + BORDER, cw, TITLE_HEIGHT - BORDER,
-                  title_bg);
-    c26_draw_text(con_x + 8, con_y + 6, "BASIC", 0xffffff, title_bg, 2);
-    c26_console_blit(con_x + BORDER, con_y + TITLE_HEIGHT);
+    draw_chrome(con_x, con_y, con_w, con_frame_h(), "BASIC", is_focused, 0);
+    if (con_min) return;
+    c26_console_blit(con_x + BORDER, con_y + TITLE_HEIGHT, con_w, con_h);
+    draw_grip(con_x, con_y, con_frame_w(), con_frame_h(), is_focused);
 }
 
 void c26_compositor_flush(void)
@@ -593,12 +624,42 @@ static void toggle_zoom(proc_t *p)
     scene_dirty = 1;
 }
 
+/* Green zoom for the console window: fill the desktop, or restore. */
+static void toggle_con_zoom(void)
+{
+    con_ensure_size();
+    int maxw = c26_console_pixel_width();
+    int maxh = c26_console_pixel_height();
+    if (con_zoom) {
+        con_x = con_sx;
+        con_y = con_sy;
+        con_w = con_sw;
+        con_h = con_sh;
+        con_zoom = 0;
+    } else {
+        con_sx = con_x;
+        con_sy = con_y;
+        con_sw = con_w;
+        con_sh = con_h;
+        con_x = 4;
+        con_y = MENU_H + 4;
+        con_w = (int)C26_SCREEN_WIDTH - 8;
+        con_h = (int)C26_SCREEN_HEIGHT - MENU_H - TITLE_HEIGHT - BORDER - DOCK_H - 8;
+        if (con_w > maxw) con_w = maxw;
+        if (con_h > maxh) con_h = maxh;
+        con_min = 0;
+        con_zoom = 1;
+    }
+    scene_dirty = 1;
+}
+
 int c26_wm_click(int x, int y, int pressed)
 {
     if (!pressed) {
         dragging = -1;
         resizing = -1;
         con_dragging = 0;
+        con_resizing = 0;
         return 0;
     }
     if (dock_click(x, y)) {
@@ -644,10 +705,30 @@ int c26_wm_click(int x, int y, int pressed)
         }
         return 1;
     }
-    /* The console window (the shell) sits under every app window. A click
-       focuses BASIC; a title-bar click also starts moving it. */
+    /* The console window (the shell) sits under every app window. It has the
+       same controls as an app: amber minimizes, green zooms, the grip resizes,
+       the title bar moves it; only the red close is inert (it is the shell). */
     if (in_box(x, y, con_x, con_y, con_frame_w(), con_frame_h())) {
         c26_cart_focus_console();
+        int dy = con_y + (TITLE_HEIGHT - DOT) / 2;
+        int d0 = con_x + BORDER + DOT_LEFT;
+        if (in_box(x, y, d0 + (DOT + DOT_GAP), dy, DOT, DOT)) {
+            con_min = !con_min;
+            scene_dirty = 1;
+            return 1;
+        }
+        if (in_box(x, y, d0 + 2 * (DOT + DOT_GAP), dy, DOT, DOT)) {
+            toggle_con_zoom();
+            return 1;
+        }
+        if (!con_min) {
+            int gx = con_x + con_frame_w() - GRIP;
+            int gy = con_y + con_frame_h() - GRIP;
+            if (in_box(x, y, gx, gy, GRIP, GRIP)) {
+                con_resizing = 1;
+                return 1;
+            }
+        }
         if (y < con_y + TITLE_HEIGHT) {
             con_dragging = 1;
             con_drag_dx = x - con_x;
@@ -676,6 +757,20 @@ static void clamp_window_size(proc_t *process)
 
 void c26_wm_pointer_moved(int x, int y)
 {
+    if (con_resizing) {
+        con_ensure_size();
+        con_w = x - (con_x + BORDER);
+        con_h = y - (con_y + TITLE_HEIGHT);
+        int maxw = c26_console_pixel_width();
+        int maxh = c26_console_pixel_height();
+        if (con_w < 30 * 12) con_w = 30 * 12;
+        if (con_h < 8 * 20) con_h = 8 * 20;
+        if (con_w > maxw) con_w = maxw;
+        if (con_h > maxh) con_h = maxh;
+        con_zoom = 0;
+        scene_dirty = 1;
+        return;
+    }
     if (con_dragging) {
         con_x = x - con_drag_dx;
         con_y = y - con_drag_dy;
