@@ -254,6 +254,22 @@ cartridges), importing a third-party stack would add tens of thousands of lines
 no one on this project can read for no new capability — the opposite of the
 machine's guiding principle. Recorded as an honest decision, not a gap.
 
+## Delivered: a unified windowed desktop (2026-07-20)
+
+The desktop had two disjoint screens — a full-screen BASIC console, and a
+separate Esc "launcher" whose panels *looked* like windows but were static and
+inert — so the shell itself was never a window and the launcher was confusing.
+Now there is one desktop: the console is a real movable, focusable window
+(title bar "BASIC", drawn by the compositor via `c26_console_blit`) on a
+desktop background, with app windows floating over it in z-order, the dock as
+the launcher, and the pointer always live. The separate launcher mode and its
+fake panels are retired (`render_desktop`/`desktop_event` deleted); Esc now
+just breaks a running program. Clicking the console focuses BASIC; dragging its
+title bar moves it — the same window-manager path as any app. The console grid
+shrank to 100×42 so the window clears the dock. Verified visually over VNC
+(BASIC window + a floating CALC window on one desktop) and by the full
+`make check`.
+
 ## Consolidation review (2026-07-19)
 
 A pass of adversarial reviews over the session's new code (apps, the RV64

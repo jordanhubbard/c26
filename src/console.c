@@ -68,24 +68,45 @@ void c26_console_putc(char ch)
     dirty = 1;
 }
 
-void c26_console_render_cells(void)
+int c26_console_pixel_width(void)
 {
-    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, (int)C26_SCREEN_HEIGHT,
+    return (int)C26_CONSOLE_COLS * CONSOLE_CELL_WIDTH;
+}
+
+int c26_console_pixel_height(void)
+{
+    return (int)C26_CONSOLE_ROWS * CONSOLE_CELL_HEIGHT;
+}
+
+/* Draw the console text grid into a window content area at pixel (ox, oy).
+   The caller (compositor) owns the surrounding window frame and background. */
+void c26_console_blit(int ox, int oy)
+{
+    c26_fill_rect(ox, oy, c26_console_pixel_width(), c26_console_pixel_height(),
                   CONSOLE_BG);
     for (unsigned int row = 0; row < C26_CONSOLE_ROWS; row++) {
         for (unsigned int col = 0; col < C26_CONSOLE_COLS; col++) {
             if (cells[row][col] != ' ') {
-                c26_draw_char(CONSOLE_ORIGIN_X + (int)col * CONSOLE_CELL_WIDTH,
-                              CONSOLE_ORIGIN_Y + (int)row * CONSOLE_CELL_HEIGHT,
+                c26_draw_char(ox + (int)col * CONSOLE_CELL_WIDTH,
+                              oy + (int)row * CONSOLE_CELL_HEIGHT,
                               cells[row][col], CONSOLE_FG, CONSOLE_BG,
                               CONSOLE_FONT_SCALE);
             }
         }
     }
-    c26_fill_rect(CONSOLE_ORIGIN_X + (int)cursor_col * CONSOLE_CELL_WIDTH,
-                  CONSOLE_ORIGIN_Y + (int)cursor_row * CONSOLE_CELL_HEIGHT,
+    c26_fill_rect(ox + (int)cursor_col * CONSOLE_CELL_WIDTH,
+                  oy + (int)cursor_row * CONSOLE_CELL_HEIGHT,
                   CONSOLE_CELL_WIDTH - 2, CONSOLE_CELL_HEIGHT - 4, CONSOLE_FG);
     dirty = 0;
+}
+
+/* Legacy full-screen render, kept for the GFX/console-only boot paths: the
+   unified desktop composites the console as a window via c26_console_blit. */
+void c26_console_render_cells(void)
+{
+    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, (int)C26_SCREEN_HEIGHT,
+                  CONSOLE_BG);
+    c26_console_blit(CONSOLE_ORIGIN_X, CONSOLE_ORIGIN_Y);
 }
 
 void c26_console_render(void)

@@ -34,12 +34,13 @@ host operating system.
   without stopping anything; `JOBS` lists and `KILL n` terminates;
   `apps/ticker` prints a heartbeat that interleaves with console work as
   the smoke gate's concurrency proof.
-- A windowed desktop: the BASIC console is the root layer and every process
-  owns a movable, decorated window composited over it in z-order — click to
-  focus, drag the title bar to move, drag the corner grip to resize, and use
-  the titlebar minimize/close boxes. Apps query their window size (ABI v2)
-  and get window-local mouse coordinates. `WINDOW SIZE/MIN/MAX/CLOSE` script
-  the same operations from BASIC.
+- A unified windowed desktop: the BASIC console is itself a movable, focusable
+  window on a desktop background, and every process owns its own decorated
+  window composited over it in z-order — click to focus, drag the title bar to
+  move, drag the corner grip to resize, and use the titlebar minimize/close
+  boxes. Apps query their window size (ABI v2) and get window-local mouse
+  coordinates. `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from
+  BASIC, and the dock (not a separate menu) launches apps.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate. A shared system clipboard

@@ -94,6 +94,16 @@ static int drag_dx;
 static int drag_dy;
 static int resizing = -1;
 
+/* The BASIC console is itself a window on the unified desktop: a movable,
+   focusable frame (never closed — it is the shell) that app windows float
+   over. focused < 0 means the console window has keyboard focus. */
+#define DESKTOP_BG 0x161c3aU
+static int con_x = 24;
+static int con_y = 40;
+static int con_dragging;
+static int con_drag_dx;
+static int con_drag_dy;
+
 /* The system clipboard: one shared text buffer any app (or BASIC via
    CLIP/PASTE) reads and writes, so copy/paste crosses the app boundary. */
 #define CLIPBOARD_MAX 256
@@ -437,6 +447,27 @@ void c26_compositor_mark_dirty(void)
     scene_dirty = 1;
 }
 
+/* Geometry of the console window (the BASIC shell), matching an app window. */
+static int con_frame_w(void) { return c26_console_pixel_width() + 2 * BORDER; }
+static int con_frame_h(void)
+{
+    return c26_console_pixel_height() + TITLE_HEIGHT + BORDER;
+}
+
+/* Draw the console as a framed, focus-aware window and blit its text inside. */
+static void draw_console_window(void)
+{
+    int cw = c26_console_pixel_width();
+    int is_focused = focused < 0;
+    uint32_t title_bg = is_focused ? 0x35409a : 0x222957;
+    c26_draw_rect(con_x, con_y, con_frame_w(), con_frame_h(),
+                  is_focused ? 0xffffff : 0x6570bd);
+    c26_fill_rect(con_x + BORDER, con_y + BORDER, cw, TITLE_HEIGHT - BORDER,
+                  title_bg);
+    c26_draw_text(con_x + 8, con_y + 6, "BASIC", 0xffffff, title_bg, 2);
+    c26_console_blit(con_x + BORDER, con_y + TITLE_HEIGHT);
+}
+
 void c26_compositor_flush(void)
 {
     c26_screen_mode_t mode = c26_screen_mode();
@@ -451,7 +482,11 @@ void c26_compositor_flush(void)
         return;
     }
     scene_dirty = 0;
-    c26_console_render_cells();
+    /* The unified desktop: a background, the console window at the bottom of
+       the z-order, app windows floating over it, then the dock and pointer. */
+    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, (int)C26_SCREEN_HEIGHT,
+                  DESKTOP_BG);
+    draw_console_window();
     for (int i = 0; i < z_count; i++) {
         proc_t *process = &procs[z_order[i]];
         process->surface_damaged = 0;
@@ -460,9 +495,7 @@ void c26_compositor_flush(void)
     if (dock_count > 0) {
         dock_draw();
     }
-    if (z_count > 0) {
-        c26_desktop_draw_pointer();
-    }
+    c26_desktop_draw_pointer();
     c26_framebuffer_present();
 }
 
@@ -481,6 +514,7 @@ int c26_wm_click(int x, int y, int pressed)
     if (!pressed) {
         dragging = -1;
         resizing = -1;
+        con_dragging = 0;
         return 0;
     }
     if (dock_click(x, y)) {
@@ -521,6 +555,17 @@ int c26_wm_click(int x, int y, int pressed)
         }
         return 1;
     }
+    /* The console window (the shell) sits under every app window. A click
+       focuses BASIC; a title-bar click also starts moving it. */
+    if (in_box(x, y, con_x, con_y, con_frame_w(), con_frame_h())) {
+        c26_cart_focus_console();
+        if (y < con_y + TITLE_HEIGHT) {
+            con_dragging = 1;
+            con_drag_dx = x - con_x;
+            con_drag_dy = y - con_y;
+        }
+        return 1;
+    }
     if (focused >= 0) {
         c26_cart_focus_console();
     }
@@ -542,6 +587,18 @@ static void clamp_window_size(proc_t *process)
 
 void c26_wm_pointer_moved(int x, int y)
 {
+    if (con_dragging) {
+        con_x = x - con_drag_dx;
+        con_y = y - con_drag_dy;
+        if (con_x < -con_frame_w() + 60) con_x = -con_frame_w() + 60;
+        if (con_y < 0) con_y = 0;
+        if (con_x > (int)C26_SCREEN_WIDTH - 60)
+            con_x = (int)C26_SCREEN_WIDTH - 60;
+        if (con_y > (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT)
+            con_y = (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT;
+        scene_dirty = 1;
+        return;
+    }
     if (resizing >= 0 && procs[resizing].state == PROC_RUNNABLE) {
         proc_t *process = &procs[resizing];
         process->win_w = x - (process->win_x + BORDER);
@@ -559,9 +616,7 @@ void c26_wm_pointer_moved(int x, int y)
         if (process->win_y > (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT)
             process->win_y = (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT;
     }
-    if (z_count > 0) {
-        scene_dirty = 1;
-    }
+    scene_dirty = 1; /* the pointer moved over the unified desktop; repaint */
 }
 
 /* ------------------------------------------------------------------ */
