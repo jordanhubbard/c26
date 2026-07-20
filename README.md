@@ -34,17 +34,23 @@ host operating system.
   without stopping anything; `JOBS` lists and `KILL n` terminates;
   `apps/ticker` prints a heartbeat that interleaves with console work as
   the smoke gate's concurrency proof.
-- A macOS-flavored desktop that the machine boots straight into: a menu bar
-  across the top (a C26 badge, the focused window's name, File/Edit/View/Go,
-  and a live clock from the RTC), a gradient wallpaper, an icon-bar dock at the
-  bottom, and a real window manager. The BASIC console is itself a movable,
-  focusable window, and every process owns its own decorated window composited
-  over it in z-order. Each window has macOS traffic-light controls — red close,
-  amber minimize, green zoom (maximize to fill the desktop) — on the left of
-  its title bar; drag the title bar to move, the corner grip to resize. Apps
-  query their window size (ABI v2) and get window-local mouse coordinates.
-  `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from BASIC, and the
-  dock launches apps.
+- A macOS-flavored desktop that the machine boots straight into, styled like an
+  Aqua-era Mac that grew out of a C64: a gradient menu bar across the top (a
+  glossy C26 badge, the focused window's name, working C26/File/Go **dropdown
+  menus** that feed BASIC and launch apps, and a live clock from the RTC), a
+  twilight wallpaper with a soft horizon glow, a floating rounded **dock** whose
+  glassy icons **magnify toward the pointer** (with a tooltip label), and a real
+  window manager. Every surface is shaded — vertical-gradient title bars and
+  panels, glossy traffic-light orbs with speculars, rounded corners, and layered
+  drop shadows — and the discrete controls **press in** on mouse-down and fire on
+  release, the macOS way. The BASIC console is itself a movable, focusable
+  window; every process owns its own decorated window composited over it in
+  z-order, and **click-to-front** raises whatever you click — the console
+  included — above the rest. Each window has traffic-light controls — red close,
+  amber minimize, green zoom (maximize to fill the desktop) — on the left of its
+  title bar; drag the title bar to move, the corner grip to resize. Apps query
+  their window size (ABI v2) and get window-local mouse coordinates.
+  `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from BASIC.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate. A shared system clipboard

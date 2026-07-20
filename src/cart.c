@@ -116,6 +116,18 @@ static int con_dragging;
 static int con_resizing;
 static int con_drag_dx;
 static int con_drag_dy;
+/* Click-to-front: the console can rise above app windows. When set, the
+   console is the top layer (drawn last, hit-tested first). */
+static int console_front = 1;
+
+/* Deferred button press: a discrete control (traffic light or dock icon) shows
+   a pushed-in state while held and fires on release, the macOS way. Drags and
+   resizes still begin on press. */
+static int press_kind; /* 0 none, 1 app dot, 2 console dot, 3 dock */
+static int press_a;    /* app: job index; dock: tile index */
+static int press_b;    /* app/console: dot 0=close 1=min 2=zoom */
+static int ptr_x = -1; /* last pointer position, for hover magnify/highlight */
+static int ptr_y = -1;
 
 /* The system clipboard: one shared text buffer any app (or BASIC via
    CLIP/PASTE) reads and writes, so copy/paste crosses the app boundary. */
@@ -202,21 +214,111 @@ void c26_dock_print(void)
     if (dock_count == 0) c26_puts("DOCK EMPTY\n");
 }
 
-/* A filled rounded rectangle: each row inset near the top/bottom corners so
-   the corners read as rounded (a circular quarter-arc). */
+/* ------------------------------------------------------------------ */
+/* Shading toolkit: colour blending and gradient/gloss fills so the whole
+   desktop reads like brushed-metal Aqua rather than flat blocks.        */
+
+/* Blend 0xRRGGBB a->b, t in [0,256]. */
+static uint32_t mix(uint32_t a, uint32_t b, int t)
+{
+    if (t < 0) t = 0;
+    if (t > 256) t = 256;
+    int ra = (int)((a >> 16) & 0xff), ga = (int)((a >> 8) & 0xff), ba = (int)(a & 0xff);
+    int rb = (int)((b >> 16) & 0xff), gb = (int)((b >> 8) & 0xff), bb = (int)(b & 0xff);
+    int r = ra + (rb - ra) * t / 256;
+    int g = ga + (gb - ga) * t / 256;
+    int bl = ba + (bb - ba) * t / 256;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)bl;
+}
+static uint32_t lighten(uint32_t c, int t) { return mix(c, 0xffffffU, t); }
+static uint32_t darken(uint32_t c, int t) { return mix(c, 0x000000U, t); }
+
+/* Transparent text: paint only the lit glyph pixels so letters sit on
+   gradients and gloss without a solid background box behind them. */
+static void draw_char_fg(int x, int y, char ch, uint32_t fg, int scale)
+{
+    const uint8_t *g = c26_font_glyph(ch);
+    for (int col = 0; col < 5; col++) {
+        for (int row = 0; row < 7; row++) {
+            if (g[col] & (1U << row)) {
+                c26_fill_rect(x + col * scale, y + row * scale, scale, scale, fg);
+            }
+        }
+    }
+}
+static void draw_text_fg(int x, int y, const char *s, uint32_t fg, int scale)
+{
+    while (*s != '\0') { draw_char_fg(x, y, *s++, fg, scale); x += 6 * scale; }
+}
+/* Text with a 1px dark drop shadow, for legible labels over busy backdrops. */
+static void draw_text_emboss(int x, int y, const char *s, uint32_t fg,
+                             uint32_t shadow, int scale)
+{
+    draw_text_fg(x + 1, y + 1, s, shadow, scale);
+    draw_text_fg(x, y, s, fg, scale);
+}
+
+/* The circular quarter-arc inset for a corner radius r at distance d from the
+   corner edge (shared by every rounded fill so they match). */
+static int corner_inset(int r, int d)
+{
+    int inset = 0;
+    if (d > 0) {
+        while ((r - inset) * (r - inset) + d * d > r * r && inset < r) inset++;
+    }
+    return inset;
+}
+
+/* A filled rounded rectangle. */
 static void fill_round_rect(int x, int y, int w, int h, int r, uint32_t color)
 {
     for (int i = 0; i < h; i++) {
         int d = -1;
         if (i < r) d = r - i;
         else if (i >= h - r) d = r - (h - 1 - i);
-        int inset = 0;
-        if (d > 0) {
-            while ((r - inset) * (r - inset) + d * d > r * r && inset < r) {
-                inset++;
-            }
-        }
+        int inset = corner_inset(r, d);
         c26_fill_rect(x + inset, y + i, w - 2 * inset, 1, color);
+    }
+}
+
+/* A square vertical gradient fill (top->bottom). */
+static void fill_vgrad(int x, int y, int w, int h, uint32_t top, uint32_t bot)
+{
+    if (h <= 0) return;
+    for (int i = 0; i < h; i++) {
+        c26_fill_rect(x, y + i, w, 1, mix(top, bot, i * 256 / h));
+    }
+}
+
+/* A rounded rectangle filled with a vertical gradient (top->bottom), the
+   staple of every panel, title bar, and button on the desktop. */
+static void fill_round_grad(int x, int y, int w, int h, int r, uint32_t top,
+                            uint32_t bot)
+{
+    if (h <= 0) return;
+    for (int i = 0; i < h; i++) {
+        int d = -1;
+        if (i < r) d = r - i;
+        else if (i >= h - r) d = r - (h - 1 - i);
+        int inset = corner_inset(r, d);
+        c26_fill_rect(x + inset, y + i, w - 2 * inset, 1,
+                      mix(top, bot, i * 256 / h));
+    }
+}
+
+/* A glossy top highlight arc over the upper third of a rounded shape — the
+   Aqua "light from above" specular that makes tiles look like wet candy. */
+static void gloss_cap(int x, int y, int w, int h, int r, uint32_t tint)
+{
+    int cap = h / 2;
+    if (cap < 3) cap = 3;
+    for (int i = 0; i < cap; i++) {
+        int d = i < r ? r - i : -1;
+        int inset = corner_inset(r, d) + 2;
+        int a = 150 - i * 150 / cap; /* fade out downward */
+        if (a <= 0) break;
+        c26_fill_rect(x + inset, y + 2 + i, w - 2 * inset, 1,
+                      mix(tint, 0xffffffU, a));
     }
 }
 
@@ -228,44 +330,77 @@ static const uint32_t dock_palette[8] = {
 static void dock_draw(void)
 {
     if (dock_count == 0) return;
-    int panel_x = dock[0].x - 8;
-    int panel_w = dock_count * DOCK_TILE_W + 16;
+    int panel_x = dock[0].x - 10;
+    int panel_w = dock_count * DOCK_TILE_W + 20;
     int panel_y = (int)C26_SCREEN_HEIGHT - DOCK_PANEL_H - 6;
-    /* the floating, rounded, slightly translucent-looking dock panel */
-    fill_round_rect(panel_x - 1, panel_y - 1, panel_w + 2, DOCK_PANEL_H + 2, 14,
-                    0x3a4488);
-    fill_round_rect(panel_x, panel_y, panel_w, DOCK_PANEL_H, 14, 0x1a2044);
+    int rad = 16;
+    /* the floating glass shelf: soft shadow, bright rim, gradient body, gloss */
+    fill_round_rect(panel_x - 1, panel_y + 4, panel_w + 2, DOCK_PANEL_H, rad,
+                    0x05070f);
+    fill_round_rect(panel_x - 1, panel_y - 1, panel_w + 2, DOCK_PANEL_H + 2, rad,
+                    0x5a63b0);
+    fill_round_grad(panel_x, panel_y, panel_w, DOCK_PANEL_H, rad, 0x2b3474,
+                    0x141a3c);
+    gloss_cap(panel_x, panel_y, panel_w, DOCK_PANEL_H, rad, 0x3b4788);
+
+    /* Magnify icons near the pointer when it is over the dock (macOS genie). */
+    int hovering = ptr_y >= dock_top();
+    int label_i = -1;
     for (int i = 0; i < dock_count; i++) {
         dock_tile_t *tile = &dock[i];
-        int ix = tile->x + (DOCK_TILE_W - DOCK_ICON) / 2;
-        int iy = panel_y + 6;
+        int cx = tile->x + DOCK_TILE_W / 2;
+        int size = DOCK_ICON;
+        if (hovering) {
+            int dist = ptr_x - cx;
+            if (dist < 0) dist = -dist;
+            int reach = DOCK_TILE_W * 2;
+            if (dist < reach) {
+                size += (DOCK_ICON * 6 / 10) * (reach - dist) / reach;
+                if (dist < DOCK_TILE_W / 2) label_i = i;
+            }
+        }
+        int pressed = press_kind == 3 && press_a == i;
+        if (pressed) size -= 4;
+        int ix = cx - size / 2;
+        int iy = panel_y + 6 + (DOCK_ICON - size); /* grow upward, base-aligned */
+        if (iy < panel_y + 2) iy = panel_y + 2;
         uint32_t c = dock_palette[i % 8];
-        fill_round_rect(ix, iy, DOCK_ICON, DOCK_ICON, 6, c);
-        /* a bright initial on the icon */
+        uint32_t top = pressed ? darken(c, 45) : lighten(c, 45);
+        uint32_t bot = pressed ? darken(c, 110) : darken(c, 50);
+        int irad = size / 5;
+        fill_round_rect(ix + 1, iy + 2, size, size, irad, 0x05070f); /* shadow */
+        fill_round_grad(ix, iy, size, size, irad, top, bot);
+        gloss_cap(ix, iy, size, size, irad, mix(c, 0xffffffU, 30));
+        /* the bright initial, embossed, scaled with the icon */
         char initial[2] = {tile->name[0], '\0'};
-        c26_draw_text(ix + DOCK_ICON / 2 - 5, iy + DOCK_ICON / 2 - 7, initial,
-                      0xffffff, c, 2);
-        /* the app name in small text (6px/char), centred under the icon */
+        int gs = size >= 44 ? 3 : 2;
+        draw_char_fg(cx - (5 * gs) / 2 + 1, iy + size / 2 - (7 * gs) / 2 + 1,
+                     initial[0], darken(c, 90), gs);
+        draw_char_fg(cx - (5 * gs) / 2, iy + size / 2 - (7 * gs) / 2, initial[0],
+                     0xffffffU, gs);
+    }
+    /* One tooltip-style label for the icon directly under the pointer. */
+    if (label_i >= 0) {
+        const char *nm = dock[label_i].name;
         int nlen = 0;
-        while (tile->name[nlen] != '\0') nlen++;
-        int label_x = tile->x + DOCK_TILE_W / 2 - nlen * 3;
-        c26_draw_text(label_x, panel_y + DOCK_PANEL_H - 12, tile->name,
-                      0xbac4ff, 0x1a2044, 1);
+        while (nm[nlen] != '\0') nlen++;
+        int lw = nlen * 6 + 10;
+        int lx = dock[label_i].x + DOCK_TILE_W / 2 - lw / 2;
+        int ly = panel_y - 20;
+        fill_round_rect(lx - 1, ly - 1, lw + 2, 17, 6, 0x5a63b0); /* rim */
+        fill_round_grad(lx, ly, lw, 15, 5, 0x252d5e, 0x141a3c);
+        draw_text_fg(lx + 5, ly + 4, nm, 0xe6ebff, 1);
     }
 }
 
-/* A click in the dock strip launches the tile under the pointer. Returns 1
-   if the click was inside the dock (so window hit-testing is skipped). */
-static int dock_click(int x, int y)
+/* The dock tile under a point, or -1 (the strip is claimed either way). */
+static int dock_tile_at(int x, int y)
 {
-    if (y < dock_top()) return 0;
+    if (y < dock_top()) return -1;
     for (int i = 0; i < dock_count; i++) {
-        if (x >= dock[i].x && x < dock[i].x + dock[i].w) {
-            c26_cart_run(dock[i].name);
-            return 1;
-        }
+        if (x >= dock[i].x && x < dock[i].x + dock[i].w) return i;
     }
-    return dock_count > 0;
+    return -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -375,6 +510,7 @@ static void drain_typeahead(void)
 void c26_cart_focus_console(void)
 {
     focused = -1;
+    console_front = 1; /* clicking the shell raises it above every app */
     scene_dirty = 1;
     c26_basic_set_external_consumer(0);
     c26_screen_set_mode(C26_SCREEN_CONSOLE);
@@ -384,6 +520,7 @@ void c26_cart_focus_console(void)
 static void focus_proc(int index)
 {
     focused = index;
+    console_front = 0; /* an app comes to the front, above the shell */
     scene_dirty = 1;
     z_raise(index);
     c26_basic_set_external_consumer(1);
@@ -444,13 +581,26 @@ static int in_box(int x, int y, int bx, int by, int w, int h)
     return x >= bx && x < bx + w && y >= by && y < by + h;
 }
 
-/* A round traffic-light dot: a filled disc approximated by stacked rows. */
-static void draw_dot(int bx, int by, uint32_t color)
+/* A glossy traffic-light orb: a shaded disc (bright top, dark rim) with a
+   specular highlight, so it reads like a backlit candy button. When pressed
+   it darkens and the highlight sinks, giving a real "pushed in" feel. */
+static const int dot_inset[DOT] = {5, 3, 2, 1, 1, 0, 0, 0, 0, 1, 1, 2, 3, 5};
+static void draw_orb(int bx, int by, uint32_t color, int pressed)
 {
-    static const int inset[DOT] = {5, 3, 2, 1, 1, 0, 0, 0, 0, 1, 1, 2, 3, 5};
+    uint32_t top = pressed ? darken(color, 60) : lighten(color, 80);
+    uint32_t bot = pressed ? darken(color, 120) : darken(color, 55);
+    uint32_t rim = darken(color, 150);
     for (int r = 0; r < DOT; r++) {
-        int in = inset[r];
-        c26_fill_rect(bx + in, by + r, DOT - 2 * in, 1, color);
+        int in = dot_inset[r];
+        c26_fill_rect(bx + in, by + r, DOT - 2 * in, 1, mix(top, bot, r * 256 / DOT));
+        c26_fill_rect(bx + in, by + r, 1, 1, rim);            /* left rim */
+        c26_fill_rect(bx + DOT - 1 - in, by + r, 1, 1, rim);  /* right rim */
+    }
+    if (!pressed) {
+        /* specular glint near the top-left */
+        uint32_t hi = lighten(color, 200);
+        c26_fill_rect(bx + 4, by + 2, 4, 2, hi);
+        c26_fill_rect(bx + 5, by + 1, 2, 1, hi);
     }
 }
 
@@ -460,39 +610,54 @@ static int str_pixels(const char *s) { int n = 0; while (s[n]) n++; return n * 1
    macOS traffic lights on the left, a centred title. Content and the resize
    grip are drawn by the caller afterwards. */
 static void draw_chrome(int wx, int wy, int cw, int frame_h, const char *title,
-                        int focused, int show_close)
+                        int focused, int show_close, int pressed_dot)
 {
     int frame_w = cw + 2 * BORDER;
-    uint32_t title_bg = focused ? 0x2b3475 : 0x1b2350;
-    uint32_t edge = focused ? 0xd7ddffU : 0x4a5599U;
+    /* Brushed title-bar gradient: a bright top edge falling to a deeper base,
+       lit differently when the window has focus. */
+    uint32_t t_top = focused ? 0x4855b0U : 0x262e60U;
+    uint32_t t_bot = focused ? 0x232c66U : 0x171d44U;
+    uint32_t edge = focused ? 0xc9d2ffU : 0x40497fU;
+    uint32_t title_bg = t_bot;
     static const int corner[4] = {3, 2, 1, 0}; /* rounded top corners */
-    /* soft drop shadow down-right */
-    c26_fill_rect(wx + 5, wy + 5, frame_w, frame_h, 0x070a1c);
-    /* frame edges, with the top corners knocked in so they read as rounded
-       (the pixels left unpainted keep the already-composited background). */
-    c26_fill_rect(wx + 3, wy, frame_w - 6, 1, edge);            /* top */
-    c26_fill_rect(wx, wy + 3, 1, frame_h - 3, edge);            /* left */
+    /* layered soft drop shadow (two offset translucent-looking rects) */
+    c26_fill_rect(wx + 7, wy + 8, frame_w, frame_h, 0x05070f);
+    c26_fill_rect(wx + 4, wy + 5, frame_w, frame_h, 0x0a0e20);
+    /* frame edges, top corners knocked in so they read as rounded (the
+       unpainted corner pixels keep the already-composited background). */
+    c26_fill_rect(wx + 3, wy, frame_w - 6, 1, edge);              /* top */
+    c26_fill_rect(wx, wy + 3, 1, frame_h - 3, edge);              /* left */
     c26_fill_rect(wx + frame_w - 1, wy + 3, 1, frame_h - 3, edge); /* right */
-    c26_fill_rect(wx, wy + frame_h - 1, frame_w, 1, edge);      /* bottom */
+    c26_fill_rect(wx, wy + frame_h - 1, frame_w, 1, edge);        /* bottom */
     for (int r = 0; r < 4; r++) {
         c26_fill_rect(wx + corner[r], wy + r, 1, 1, edge);
         c26_fill_rect(wx + frame_w - 1 - corner[r], wy + r, 1, 1, edge);
     }
-    /* title bar fill with matching rounded top */
-    for (int r = 0; r < TITLE_HEIGHT - BORDER; r++) {
+    /* title-bar gradient with matching rounded top */
+    int th = TITLE_HEIGHT - BORDER;
+    for (int r = 0; r < th; r++) {
         int in = r < 4 ? corner[r] : 0;
-        uint32_t c = r < 2 ? (focused ? 0x3c4699 : 0x232c63) : title_bg;
-        c26_fill_rect(wx + BORDER + in, wy + BORDER + r, cw - 2 * in, 1, c);
+        c26_fill_rect(wx + BORDER + in, wy + BORDER + r, cw - 2 * in, 1,
+                      mix(t_top, t_bot, r * 256 / th));
     }
+    /* 1px inner highlight under the top edge, 1px shadow at the seam */
+    c26_fill_rect(wx + BORDER + 3, wy + BORDER, cw - 6, 1, lighten(t_top, 60));
+    c26_fill_rect(wx + BORDER, wy + TITLE_HEIGHT - 1, cw, 1, darken(t_bot, 40));
     int dy = wy + (TITLE_HEIGHT - DOT) / 2;
     int d0 = wx + BORDER + DOT_LEFT;
-    draw_dot(d0, dy, focused ? (show_close ? COL_CLOSE : 0x6b6f8a) : 0x6b6f8a);
-    draw_dot(d0 + (DOT + DOT_GAP), dy, focused ? COL_MIN : 0x6b6f8a);
-    draw_dot(d0 + 2 * (DOT + DOT_GAP), dy, focused ? COL_ZOOM : 0x6b6f8a);
+    uint32_t dim = 0x5a5f7eU;
+    draw_orb(d0, dy, focused ? (show_close ? COL_CLOSE : dim) : dim,
+             pressed_dot == 0);
+    draw_orb(d0 + (DOT + DOT_GAP), dy, focused ? COL_MIN : dim, pressed_dot == 1);
+    draw_orb(d0 + 2 * (DOT + DOT_GAP), dy, focused ? COL_ZOOM : dim,
+             pressed_dot == 2);
     int tx = wx + frame_w / 2 - str_pixels(title) / 2;
     int dots_right = d0 + 3 * (DOT + DOT_GAP) + 6;
     if (tx < dots_right) tx = dots_right;
-    c26_draw_text(tx, wy + 6, title, focused ? 0xffffff : 0x9aa4d8, title_bg, 2);
+    (void)title_bg;
+    /* engrave the title: a dark shadow then the light face, no box */
+    draw_text_emboss(tx, wy + 6, title, focused ? 0xffffffU : 0x9aa4d8U,
+                     darken(t_bot, 70), 2);
 }
 
 static void draw_grip(int wx, int wy, int frame_w, int frame_h, int focused)
@@ -512,11 +677,12 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
     int content_y = process->win_y + TITLE_HEIGHT;
     int frame_w = win_frame_w(process);
     int frame_h = win_frame_h(process);
-    int is_focused = process == &procs[focused >= 0 ? focused : 0] &&
-                     focused >= 0;
+    int job = (int)(process - procs);
+    int is_focused = focused == job;
+    int pdot = (press_kind == 1 && press_a == job) ? press_b : -1;
 
     draw_chrome(process->win_x, process->win_y, process->win_w, frame_h,
-                process->name, is_focused, 1);
+                process->name, is_focused, 1, pdot);
 
     if (process->minimized) {
         return;
@@ -561,18 +727,23 @@ static int con_frame_h(void)
     return con_min ? TITLE_HEIGHT + BORDER : con_h + TITLE_HEIGHT + BORDER;
 }
 
-/* A vertical gradient wallpaper — the C64-meets-macOS desktop. */
+/* A deep twilight wallpaper with a soft aurora glow behind the menu bar and a
+   darker vignette at the bottom — the C64-meets-macOS desktop. */
 static void draw_wallpaper(void)
 {
-    const int bands = 48;
-    int band_h = (int)C26_SCREEN_HEIGHT / bands + 1;
-    /* top 0x1a2352 -> bottom 0x0b1130, a deep twilight blue. */
-    for (int b = 0; b < bands; b++) {
-        int r = 0x1a + (0x0b - 0x1a) * b / bands;
-        int g = 0x23 + (0x11 - 0x23) * b / bands;
-        int bl = 0x52 + (0x30 - 0x52) * b / bands;
-        uint32_t c = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)bl;
-        c26_fill_rect(0, b * band_h, (int)C26_SCREEN_WIDTH, band_h, c);
+    int W = (int)C26_SCREEN_WIDTH;
+    int H = (int)C26_SCREEN_HEIGHT;
+    fill_vgrad(0, 0, W, H, 0x1b2a63, 0x080a1e);
+    /* a broad, faint horizon glow a third of the way down */
+    int gy = H / 3;
+    int gh = H / 3;
+    for (int i = 0; i < gh; i++) {
+        int d = i - gh / 2;
+        if (d < 0) d = -d;
+        int a = 22 - d * 22 / (gh / 2); /* peak in the middle, fade out */
+        if (a <= 0) continue;
+        c26_fill_rect(0, gy + i, W, 1,
+                      mix(mix(0x1b2a63, 0x080a1e, (gy + i) * 256 / H), 0x3a5aa0, a));
     }
 }
 
@@ -611,43 +782,62 @@ static int menu_open = -1;
 
 static void draw_menu_bar(void)
 {
-    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, MENU_H, 0x0d1233);
-    c26_fill_rect(0, MENU_H - 1, (int)C26_SCREEN_WIDTH, 1, 0x3a4488);
-    /* C26 badge (the apple-menu spot) + the clickable menu titles. */
-    c26_fill_rect(10, 6, 16, 16, 0x68f0c0);
-    c26_fill_rect(13, 9, 10, 10, 0x0d1233);
+    /* brushed gradient bar with a bright top hairline and a shadow seam */
+    fill_vgrad(0, 0, (int)C26_SCREEN_WIDTH, MENU_H, 0x1a2150, 0x0a0e2a);
+    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, 1, 0x33407e);
+    c26_fill_rect(0, MENU_H - 1, (int)C26_SCREEN_WIDTH, 1, 0x05070f);
+    /* C26 badge: a glossy rounded chip in the apple-menu spot. */
+    fill_round_grad(8, 5, 20, 18, 5, 0x7dffd0, 0x27b98c);
+    gloss_cap(8, 5, 20, 18, 5, 0x7dffd0);
+    draw_char_fg(15, 8, 'C', 0x083026, 2);
     for (int i = 0; i < MENU_COUNT; i++) {
-        uint32_t bg = (menu_open == i) ? 0x35409a : 0x0d1233;
-        if (menu_open == i) c26_fill_rect(menus[i].x, 2, menus[i].w, MENU_H - 3, bg);
-        int tx = (i == 0) ? 34 : menus[i].x + 8;
-        c26_draw_text(tx, 6, menus[i].title, 0xffffff, bg, 2);
+        if (menu_open == i) {
+            fill_round_grad(menus[i].x, 3, menus[i].w, MENU_H - 5, 4, 0x4653b4,
+                            0x333d92);
+        }
+        int tx = (i == 0) ? 36 : menus[i].x + 8;
+        draw_text_fg(tx, 7, menus[i].title, 0xffffffU, 2);
     }
     const char *active = focused < 0 ? "BASIC" : procs[focused].name;
-    c26_draw_text(100, 6, active, 0xffd34d, 0x0d1233, 2);
+    draw_text_emboss(102, 7, active, 0xffd34dU, 0x2a1e00, 2);
     uint64_t s = c26_rtc_seconds();
     unsigned int mm = (unsigned int)((s / 60) % 60);
     unsigned int hh = (unsigned int)((s / 3600) % 24);
     char clk[6] = {(char)('0' + hh / 10), (char)('0' + hh % 10), ':',
                    (char)('0' + mm / 10), (char)('0' + mm % 10), '\0'};
-    c26_draw_text((int)C26_SCREEN_WIDTH - 70, 6, clk, 0xbac4ff, 0x0d1233, 2);
+    draw_text_fg((int)C26_SCREEN_WIDTH - 70, 7, clk, 0xcfd7ffU, 2);
 
     if (menu_open < 0) return;
-    /* The open dropdown, over everything. */
+    /* The open dropdown: a soft-shadowed, rounded, gradient panel with a
+       highlighted row under the pointer. */
     int mx = menus[menu_open].x;
     int n = menus[menu_open].n;
     int mh = n * MENU_ROW_H + 8;
-    c26_fill_rect(mx + 4, MENU_H + 4, MENU_DROP_W, mh, 0x070a1c); /* shadow */
-    c26_fill_rect(mx, MENU_H, MENU_DROP_W, mh, 0x141a3a);
-    c26_draw_rect(mx, MENU_H, MENU_DROP_W, mh, 0x4a5599);
+    int top = MENU_H;
+    fill_round_rect(mx + 4, top + 6, MENU_DROP_W, mh, 8, 0x05070f);   /* shadow */
+    fill_round_rect(mx + 2, top + 4, MENU_DROP_W, mh, 8, 0x0a0e20);
+    fill_round_rect(mx - 1, top - 1, MENU_DROP_W + 2, mh + 2, 8, 0x5a63b0); /* rim */
+    fill_round_grad(mx, top, MENU_DROP_W, mh, 8, 0x232a58, 0x161c3c);
+    int hover = -1;
+    if (ptr_x >= mx && ptr_x < mx + MENU_DROP_W && ptr_y >= top &&
+        ptr_y < top + mh) {
+        hover = (ptr_y - top - 4) / MENU_ROW_H;
+    }
     for (int i = 0; i < n; i++) {
-        int ry = MENU_H + 4 + i * MENU_ROW_H;
+        int ry = top + 4 + i * MENU_ROW_H;
         const menu_item_t *it = &menus[menu_open].items[i];
         if (it->kind == 3) {
-            c26_fill_rect(mx + 6, ry + MENU_ROW_H / 2, MENU_DROP_W - 12, 1,
+            c26_fill_rect(mx + 8, ry + MENU_ROW_H / 2, MENU_DROP_W - 16, 1,
                           0x39427f);
-        } else {
-            c26_draw_text(mx + 14, ry + 4, it->label, 0xdfe4ff, 0x141a3a, 2);
+            continue;
         }
+        uint32_t fg = 0xdfe4ffU;
+        if (i == hover) {
+            fill_round_grad(mx + 3, ry, MENU_DROP_W - 6, MENU_ROW_H - 2, 4,
+                            0x4f5cc4, 0x3a45a0);
+            fg = 0xffffffU;
+        }
+        draw_text_fg(mx + 14, ry + 4, it->label, fg, 2);
     }
 }
 
@@ -702,7 +892,8 @@ static void draw_console_window(void)
 {
     con_ensure_size();
     int is_focused = focused < 0;
-    draw_chrome(con_x, con_y, con_w, con_frame_h(), "BASIC", is_focused, 0);
+    int pdot = (press_kind == 2) ? press_b : -1;
+    draw_chrome(con_x, con_y, con_w, con_frame_h(), "BASIC", is_focused, 0, pdot);
     if (con_min) return;
     c26_console_blit(con_x + BORDER, con_y + TITLE_HEIGHT, con_w, con_h);
     draw_grip(con_x, con_y, con_frame_w(), con_frame_h(), is_focused);
@@ -725,12 +916,13 @@ void c26_compositor_flush(void)
     /* The unified desktop: wallpaper, the console window at the bottom of the
        z-order, app windows over it, the dock, the top menu bar, the pointer. */
     draw_wallpaper();
-    draw_console_window();
+    if (!console_front) draw_console_window();
     for (int i = 0; i < z_count; i++) {
         proc_t *process = &procs[z_order[i]];
         process->surface_damaged = 0;
         blit_window(process, proc_surface[z_order[i]]);
     }
+    if (console_front) draw_console_window();
     if (dock_count > 0) {
         dock_draw();
     }
@@ -805,92 +997,127 @@ static void toggle_con_zoom(void)
     scene_dirty = 1;
 }
 
+/* Press over an app window: focus it, then arm a traffic-light press (fires on
+   release) or begin a drag/resize. Always claims the click. */
+static int press_window(int job, int x, int y)
+{
+    proc_t *p = &procs[job];
+    focus_proc(job);
+    int bx, by;
+    close_box(p, &bx, &by);
+    if (in_box(x, y, bx, by, DOT, DOT)) {
+        press_kind = 1; press_a = job; press_b = 0; scene_dirty = 1; return 1;
+    }
+    min_box(p, &bx, &by);
+    if (in_box(x, y, bx, by, DOT, DOT)) {
+        press_kind = 1; press_a = job; press_b = 1; scene_dirty = 1; return 1;
+    }
+    zoom_box(p, &bx, &by);
+    if (in_box(x, y, bx, by, DOT, DOT)) {
+        press_kind = 1; press_a = job; press_b = 2; scene_dirty = 1; return 1;
+    }
+    if (!p->minimized) {
+        int gx, gy;
+        grip_box(p, &gx, &gy);
+        if (in_box(x, y, gx, gy, GRIP, GRIP)) { resizing = job; return 1; }
+    }
+    if (y < p->win_y + TITLE_HEIGHT) {
+        dragging = job; drag_dx = x - p->win_x; drag_dy = y - p->win_y;
+    }
+    return 1;
+}
+
+/* Press over the console shell: same controls as an app (amber/green arm a
+   press; the red close is inert on the shell), else drag/resize. */
+static int press_console(int x, int y)
+{
+    c26_cart_focus_console();
+    int dy = con_y + (TITLE_HEIGHT - DOT) / 2;
+    int d0 = con_x + BORDER + DOT_LEFT;
+    if (in_box(x, y, d0 + (DOT + DOT_GAP), dy, DOT, DOT)) {
+        press_kind = 2; press_b = 1; scene_dirty = 1; return 1;
+    }
+    if (in_box(x, y, d0 + 2 * (DOT + DOT_GAP), dy, DOT, DOT)) {
+        press_kind = 2; press_b = 2; scene_dirty = 1; return 1;
+    }
+    if (!con_min) {
+        int gx = con_x + con_frame_w() - GRIP;
+        int gy = con_y + con_frame_h() - GRIP;
+        if (in_box(x, y, gx, gy, GRIP, GRIP)) { con_resizing = 1; return 1; }
+    }
+    if (y < con_y + TITLE_HEIGHT) {
+        con_dragging = 1; con_drag_dx = x - con_x; con_drag_dy = y - con_y;
+    }
+    return 1;
+}
+
+static int con_in_frame(int x, int y)
+{
+    return in_box(x, y, con_x, con_y, con_frame_w(), con_frame_h());
+}
+
+/* Fire the armed button if the pointer is still over it — the macOS release
+   semantic that lets a press be cancelled by sliding off. */
+static void release_press(int x, int y)
+{
+    int kind = press_kind, a = press_a, b = press_b;
+    press_kind = 0;
+    if (kind == 1 && procs[a].state == PROC_RUNNABLE) {
+        proc_t *p = &procs[a];
+        int bx, by;
+        if (b == 0) {
+            close_box(p, &bx, &by);
+            if (in_box(x, y, bx, by, DOT, DOT)) { c26_cart_kill(a); return; }
+        } else if (b == 1) {
+            min_box(p, &bx, &by);
+            if (in_box(x, y, bx, by, DOT, DOT)) p->minimized = !p->minimized;
+        } else {
+            zoom_box(p, &bx, &by);
+            if (in_box(x, y, bx, by, DOT, DOT)) toggle_zoom(p);
+        }
+    } else if (kind == 2) {
+        int dy = con_y + (TITLE_HEIGHT - DOT) / 2;
+        int d0 = con_x + BORDER + DOT_LEFT;
+        if (b == 1) {
+            if (in_box(x, y, d0 + (DOT + DOT_GAP), dy, DOT, DOT)) con_min = !con_min;
+        } else if (b == 2) {
+            if (in_box(x, y, d0 + 2 * (DOT + DOT_GAP), dy, DOT, DOT)) toggle_con_zoom();
+        }
+    } else if (kind == 3 && a >= 0 && a < dock_count) {
+        if (dock_tile_at(x, y) == a) c26_cart_run(dock[a].name);
+    }
+}
+
 int c26_wm_click(int x, int y, int pressed)
 {
     if (!pressed) {
+        int had = press_kind != 0;
+        release_press(x, y);
         dragging = -1;
         resizing = -1;
         con_dragging = 0;
         con_resizing = 0;
-        return 0;
+        scene_dirty = 1;
+        return had;
     }
     if (menu_click(x, y)) {
         return 1;
     }
-    if (dock_click(x, y)) {
-        return 1;
+    if (y >= dock_top()) {
+        int t = dock_tile_at(x, y);
+        if (t >= 0) { press_kind = 3; press_a = t; scene_dirty = 1; }
+        return dock_count > 0;
     }
+    /* Windows in front-to-back order, so the topmost claims the click. */
+    if (console_front && con_in_frame(x, y)) return press_console(x, y);
     for (int i = z_count - 1; i >= 0; i--) {
         int job = z_order[i];
-        proc_t *process = &procs[job];
-        if (!in_box(x, y, process->win_x, process->win_y, win_frame_w(process),
-                    win_frame_h(process))) {
-            continue;
+        proc_t *p = &procs[job];
+        if (in_box(x, y, p->win_x, p->win_y, win_frame_w(p), win_frame_h(p))) {
+            return press_window(job, x, y);
         }
-        focus_proc(job);
-        int bx, by;
-        close_box(process, &bx, &by);
-        if (in_box(x, y, bx, by, DOT, DOT)) {
-            c26_cart_kill(job);
-            return 1;
-        }
-        min_box(process, &bx, &by);
-        if (in_box(x, y, bx, by, DOT, DOT)) {
-            process->minimized = !process->minimized;
-            scene_dirty = 1;
-            return 1;
-        }
-        zoom_box(process, &bx, &by);
-        if (in_box(x, y, bx, by, DOT, DOT)) {
-            toggle_zoom(process);
-            return 1;
-        }
-        if (!process->minimized) {
-            int gx, gy;
-            grip_box(process, &gx, &gy);
-            if (in_box(x, y, gx, gy, GRIP, GRIP)) {
-                resizing = job;
-                return 1;
-            }
-        }
-        if (y < process->win_y + TITLE_HEIGHT) {
-            dragging = job;
-            drag_dx = x - process->win_x;
-            drag_dy = y - process->win_y;
-        }
-        return 1;
     }
-    /* The console window (the shell) sits under every app window. It has the
-       same controls as an app: amber minimizes, green zooms, the grip resizes,
-       the title bar moves it; only the red close is inert (it is the shell). */
-    if (in_box(x, y, con_x, con_y, con_frame_w(), con_frame_h())) {
-        c26_cart_focus_console();
-        int dy = con_y + (TITLE_HEIGHT - DOT) / 2;
-        int d0 = con_x + BORDER + DOT_LEFT;
-        if (in_box(x, y, d0 + (DOT + DOT_GAP), dy, DOT, DOT)) {
-            con_min = !con_min;
-            scene_dirty = 1;
-            return 1;
-        }
-        if (in_box(x, y, d0 + 2 * (DOT + DOT_GAP), dy, DOT, DOT)) {
-            toggle_con_zoom();
-            return 1;
-        }
-        if (!con_min) {
-            int gx = con_x + con_frame_w() - GRIP;
-            int gy = con_y + con_frame_h() - GRIP;
-            if (in_box(x, y, gx, gy, GRIP, GRIP)) {
-                con_resizing = 1;
-                return 1;
-            }
-        }
-        if (y < con_y + TITLE_HEIGHT) {
-            con_dragging = 1;
-            con_drag_dx = x - con_x;
-            con_drag_dy = y - con_y;
-        }
-        return 1;
-    }
+    if (!console_front && con_in_frame(x, y)) return press_console(x, y);
     if (focused >= 0) {
         c26_cart_focus_console();
     }
@@ -912,6 +1139,8 @@ static void clamp_window_size(proc_t *process)
 
 void c26_wm_pointer_moved(int x, int y)
 {
+    ptr_x = x;
+    ptr_y = y;
     if (con_resizing) {
         con_ensure_size();
         con_w = x - (con_x + BORDER);
