@@ -28,9 +28,15 @@
 #define WINDOW_DEFAULT_W 840
 #define WINDOW_DEFAULT_H 620
 
-/* Titlebar affordances (minimize / close) and the bottom-right resize grip. */
-#define BTN 16
-#define BTN_PAD 5
+/* The desktop menu bar (macOS-style, at the very top) and window chrome:
+   three traffic-light dots on the left of each title bar and a resize grip. */
+#define MENU_H 28
+#define DOT 14
+#define DOT_GAP 6
+#define DOT_LEFT 10
+#define COL_CLOSE 0xff5f57U  /* red   */
+#define COL_MIN 0xfebc2eU    /* amber */
+#define COL_ZOOM 0x28c840U   /* green */
 #define GRIP 14
 #define MIN_WIN_W 140
 #define MIN_WIN_H 70
@@ -65,6 +71,8 @@ typedef struct {
     int win_w;
     int win_h;
     int minimized; /* collapsed to just the title bar */
+    int zoomed;    /* maximized to fill the desktop (green button) */
+    int save_x, save_y, save_w, save_h; /* geometry before zoom */
     message_t mail[MAILBOX_SLOTS];
     unsigned int mail_head;
     unsigned int mail_tail;
@@ -360,18 +368,22 @@ static int win_frame_h(const proc_t *p)
                         : p->win_h + TITLE_HEIGHT + BORDER;
 }
 
+/* Traffic-light dots on the LEFT of the title bar: close, minimize, zoom. */
+static int dot_y(const proc_t *p) { return p->win_y + (TITLE_HEIGHT - DOT) / 2; }
 static void close_box(const proc_t *p, int *bx, int *by)
 {
-    *bx = p->win_x + win_frame_w(p) - BORDER - BTN - BTN_PAD;
-    *by = p->win_y + (TITLE_HEIGHT - BTN) / 2;
+    *bx = p->win_x + BORDER + DOT_LEFT;
+    *by = dot_y(p);
 }
-
 static void min_box(const proc_t *p, int *bx, int *by)
 {
-    int cx, cy;
-    close_box(p, &cx, &cy);
-    *bx = cx - BTN - BTN_PAD;
-    *by = cy;
+    *bx = p->win_x + BORDER + DOT_LEFT + (DOT + DOT_GAP);
+    *by = dot_y(p);
+}
+static void zoom_box(const proc_t *p, int *bx, int *by)
+{
+    *bx = p->win_x + BORDER + DOT_LEFT + 2 * (DOT + DOT_GAP);
+    *by = dot_y(p);
 }
 
 static void grip_box(const proc_t *p, int *gx, int *gy)
@@ -385,10 +397,11 @@ static int in_box(int x, int y, int bx, int by, int w, int h)
     return x >= bx && x < bx + w && y >= by && y < by + h;
 }
 
-static void draw_button(int bx, int by, char glyph, uint32_t bg)
+/* A rounded traffic-light dot (a filled square with its corners knocked out). */
+static void draw_dot(int bx, int by, uint32_t color)
 {
-    c26_fill_rect(bx, by, BTN, BTN, bg);
-    c26_draw_char(bx + 2, by, glyph, 0xffffff, bg, 2);
+    c26_fill_rect(bx + 1, by, DOT - 2, DOT, color);
+    c26_fill_rect(bx, by + 1, DOT, DOT - 2, color);
 }
 
 static void blit_window(const proc_t *process, const uint32_t *surface)
@@ -406,15 +419,18 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
                   is_focused ? 0xffffff : 0x6570bd);
     c26_fill_rect(process->win_x + BORDER, process->win_y + BORDER,
                   process->win_w, TITLE_HEIGHT - BORDER, title_bg);
-    c26_draw_text(process->win_x + 8, process->win_y + 6, process->name,
-                  0xffffff, title_bg, 2);
 
-    /* Minimize/restore and close affordances, drawn over the title fill. */
+    /* macOS-style traffic lights on the left; the title follows them. */
     int bx, by;
-    min_box(process, &bx, &by);
-    draw_button(bx, by, process->minimized ? '+' : '-', 0x555b8a);
     close_box(process, &bx, &by);
-    draw_button(bx, by, 'X', 0xb03030);
+    draw_dot(bx, by, is_focused ? COL_CLOSE : 0x6b6f8a);
+    min_box(process, &bx, &by);
+    draw_dot(bx, by, is_focused ? COL_MIN : 0x6b6f8a);
+    zoom_box(process, &bx, &by);
+    draw_dot(bx, by, is_focused ? COL_ZOOM : 0x6b6f8a);
+    zoom_box(process, &bx, &by);
+    c26_draw_text(bx + DOT + 12, process->win_y + 6, process->name,
+                  0xffffff, title_bg, 2);
 
     if (process->minimized) {
         return;
@@ -454,6 +470,47 @@ static int con_frame_h(void)
     return c26_console_pixel_height() + TITLE_HEIGHT + BORDER;
 }
 
+/* A vertical gradient wallpaper — the C64-meets-macOS desktop. */
+static void draw_wallpaper(void)
+{
+    const int bands = 48;
+    int band_h = (int)C26_SCREEN_HEIGHT / bands + 1;
+    /* top 0x1a2352 -> bottom 0x0b1130, a deep twilight blue. */
+    for (int b = 0; b < bands; b++) {
+        int r = 0x1a + (0x0b - 0x1a) * b / bands;
+        int g = 0x23 + (0x11 - 0x23) * b / bands;
+        int bl = 0x52 + (0x30 - 0x52) * b / bands;
+        uint32_t c = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)bl;
+        c26_fill_rect(0, b * band_h, (int)C26_SCREEN_WIDTH, band_h, c);
+    }
+}
+
+/* The menu bar across the top: a C26 badge, the focused window's name, and a
+   wall-clock (HH:MM, from the RTC). Drawn last so windows tuck under it. */
+static void draw_menu_bar(void)
+{
+    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, MENU_H, 0x0d1233);
+    c26_fill_rect(0, MENU_H - 1, (int)C26_SCREEN_WIDTH, 1, 0x3a4488);
+    /* C26 badge: a small bright square, like the apple menu. */
+    c26_fill_rect(10, 6, 16, 16, 0x68f0c0);
+    c26_fill_rect(13, 9, 10, 10, 0x0d1233);
+    c26_draw_text(34, 6, "C26", 0xffffff, 0x0d1233, 2);
+    const char *active = focused < 0 ? "BASIC" : procs[focused].name;
+    c26_draw_text(96, 6, active, 0xffd34d, 0x0d1233, 2);
+    c26_draw_text(220, 8, "FILE  EDIT  VIEW  GO", 0x9aa4d8, 0x0d1233, 1);
+    uint64_t s = c26_rtc_seconds();
+    unsigned int mm = (unsigned int)((s / 60) % 60);
+    unsigned int hh = (unsigned int)((s / 3600) % 24);
+    char clk[6];
+    clk[0] = (char)('0' + hh / 10);
+    clk[1] = (char)('0' + hh % 10);
+    clk[2] = ':';
+    clk[3] = (char)('0' + mm / 10);
+    clk[4] = (char)('0' + mm % 10);
+    clk[5] = '\0';
+    c26_draw_text((int)C26_SCREEN_WIDTH - 70, 6, clk, 0xbac4ff, 0x0d1233, 2);
+}
+
 /* Draw the console as a framed, focus-aware window and blit its text inside. */
 static void draw_console_window(void)
 {
@@ -482,10 +539,9 @@ void c26_compositor_flush(void)
         return;
     }
     scene_dirty = 0;
-    /* The unified desktop: a background, the console window at the bottom of
-       the z-order, app windows floating over it, then the dock and pointer. */
-    c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, (int)C26_SCREEN_HEIGHT,
-                  DESKTOP_BG);
+    /* The unified desktop: wallpaper, the console window at the bottom of the
+       z-order, app windows over it, the dock, the top menu bar, the pointer. */
+    draw_wallpaper();
     draw_console_window();
     for (int i = 0; i < z_count; i++) {
         proc_t *process = &procs[z_order[i]];
@@ -495,6 +551,7 @@ void c26_compositor_flush(void)
     if (dock_count > 0) {
         dock_draw();
     }
+    draw_menu_bar();
     c26_desktop_draw_pointer();
     c26_framebuffer_present();
 }
@@ -507,6 +564,33 @@ void c26_wm_cancel_drag(void)
 {
     dragging = -1;
     resizing = -1;
+}
+
+/* Green "zoom" button: fill the desktop (below the menu bar, above the dock),
+   or restore the pre-zoom geometry. */
+static void toggle_zoom(proc_t *p)
+{
+    if (p->zoomed) {
+        p->win_x = p->save_x;
+        p->win_y = p->save_y;
+        p->win_w = p->save_w;
+        p->win_h = p->save_h;
+        p->zoomed = 0;
+    } else {
+        p->save_x = p->win_x;
+        p->save_y = p->win_y;
+        p->save_w = p->win_w;
+        p->save_h = p->win_h;
+        p->win_x = BORDER;
+        p->win_y = MENU_H;
+        p->win_w = (int)C26_SCREEN_WIDTH - 2 * BORDER;
+        p->win_h = (int)C26_SCREEN_HEIGHT - MENU_H - TITLE_HEIGHT - BORDER -
+                   DOCK_H;
+        p->minimized = 0;
+        p->zoomed = 1;
+    }
+    p->surface_damaged = 1;
+    scene_dirty = 1;
 }
 
 int c26_wm_click(int x, int y, int pressed)
@@ -530,14 +614,19 @@ int c26_wm_click(int x, int y, int pressed)
         focus_proc(job);
         int bx, by;
         close_box(process, &bx, &by);
-        if (in_box(x, y, bx, by, BTN, BTN)) {
+        if (in_box(x, y, bx, by, DOT, DOT)) {
             c26_cart_kill(job);
             return 1;
         }
         min_box(process, &bx, &by);
-        if (in_box(x, y, bx, by, BTN, BTN)) {
+        if (in_box(x, y, bx, by, DOT, DOT)) {
             process->minimized = !process->minimized;
             scene_dirty = 1;
+            return 1;
+        }
+        zoom_box(process, &bx, &by);
+        if (in_box(x, y, bx, by, DOT, DOT)) {
+            toggle_zoom(process);
             return 1;
         }
         if (!process->minimized) {
@@ -591,7 +680,7 @@ void c26_wm_pointer_moved(int x, int y)
         con_x = x - con_drag_dx;
         con_y = y - con_drag_dy;
         if (con_x < -con_frame_w() + 60) con_x = -con_frame_w() + 60;
-        if (con_y < 0) con_y = 0;
+        if (con_y < MENU_H) con_y = MENU_H;
         if (con_x > (int)C26_SCREEN_WIDTH - 60)
             con_x = (int)C26_SCREEN_WIDTH - 60;
         if (con_y > (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT)
@@ -610,7 +699,7 @@ void c26_wm_pointer_moved(int x, int y)
         process->win_y = y - drag_dy;
         if (process->win_x < -process->win_w + 40)
             process->win_x = -process->win_w + 40;
-        if (process->win_y < 0) process->win_y = 0;
+        if (process->win_y < MENU_H) process->win_y = MENU_H;
         if (process->win_x > (int)C26_SCREEN_WIDTH - 40)
             process->win_x = (int)C26_SCREEN_WIDTH - 40;
         if (process->win_y > (int)C26_SCREEN_HEIGHT - TITLE_HEIGHT)
@@ -1085,6 +1174,7 @@ int c26_cart_run(const char *name)
     process->win_x = 80 + slot * 96;
     process->win_y = 60 + slot * 68;
     process->minimized = 0;
+    process->zoomed = 0;
     process->mail_head = 0;
     process->mail_tail = 0;
     process->state = PROC_RUNNABLE;

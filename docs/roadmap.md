@@ -254,6 +254,21 @@ cartridges), importing a third-party stack would add tens of thousands of lines
 no one on this project can read for no new capability — the opposite of the
 machine's guiding principle. Recorded as an honest decision, not a gap.
 
+## Delivered: a macOS-flavored desktop shell (2026-07-20)
+
+The machine boots straight into a proper desktop — "what macOS might have
+looked like had it grown out of a Commodore 64." The compositor (`src/cart.c`)
+now draws a **menu bar** across the top (a C26 badge, the focused window's
+name, decorative File/Edit/View/Go menus, and a live HH:MM clock from the RTC),
+a **gradient wallpaper**, and **macOS traffic-light window controls** — red
+close, amber minimize, green zoom — as rounded dots on the left of every title
+bar, with the title following them. The green button maximizes a window to fill
+the desktop (below the menu bar, above the dock) and restores it. Windows are
+kept below the menu bar. Together with the unified console-as-a-window and the
+dock as the icon bar, this is a single coherent desktop with a real window
+manager. Gated by `make check`; verified visually over VNC (menu bar, traffic
+lights, gradient, a floating CALC window over the BASIC window).
+
 ## Delivered: a unified windowed desktop (2026-07-20)
 
 The desktop had two disjoint screens — a full-screen BASIC console, and a

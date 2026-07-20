@@ -34,13 +34,17 @@ host operating system.
   without stopping anything; `JOBS` lists and `KILL n` terminates;
   `apps/ticker` prints a heartbeat that interleaves with console work as
   the smoke gate's concurrency proof.
-- A unified windowed desktop: the BASIC console is itself a movable, focusable
-  window on a desktop background, and every process owns its own decorated
-  window composited over it in z-order — click to focus, drag the title bar to
-  move, drag the corner grip to resize, and use the titlebar minimize/close
-  boxes. Apps query their window size (ABI v2) and get window-local mouse
-  coordinates. `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from
-  BASIC, and the dock (not a separate menu) launches apps.
+- A macOS-flavored desktop that the machine boots straight into: a menu bar
+  across the top (a C26 badge, the focused window's name, File/Edit/View/Go,
+  and a live clock from the RTC), a gradient wallpaper, an icon-bar dock at the
+  bottom, and a real window manager. The BASIC console is itself a movable,
+  focusable window, and every process owns its own decorated window composited
+  over it in z-order. Each window has macOS traffic-light controls — red close,
+  amber minimize, green zoom (maximize to fill the desktop) — on the left of
+  its title bar; drag the title bar to move, the corner grip to resize. Apps
+  query their window size (ABI v2) and get window-local mouse coordinates.
+  `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from BASIC, and the
+  dock launches apps.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate. A shared system clipboard
