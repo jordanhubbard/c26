@@ -41,7 +41,7 @@ QEMU_DEVICES := -device virtio-gpu-device -device virtio-keyboard-device \
 	-netdev user,id=net0,hostfwd=udp:127.0.0.1:12600-:2600,hostfwd=udp:127.0.0.1:12601-:2601 \
 	-device virtio-net-device,netdev=net0
 
-.PHONY: all build carts disk run run-headless smoke test check compdb scheme-repl clean
+.PHONY: all build carts disk run run-headless run-vnc smoke test check compdb scheme-repl clean
 
 all: build carts compdb
 
@@ -127,6 +127,19 @@ run-headless: $(ELF) $(DISK)
 		-device virtio-sound-device,audiodev=audio0 \
 		-drive if=none,format=raw,file=$(DISK),id=c26disk \
 		-device virtio-blk-device,drive=c26disk
+
+# The graphical desktop served over VNC (127.0.0.1:5901) with a fully-emulated
+# null audio backend — no host display or audio needed, so it works headless
+# or over a remote shell. Connect with any VNC viewer (macOS: open vnc://...).
+run-vnc: $(ELF) $(DISK)
+	@echo "c26 desktop on VNC 127.0.0.1:5901 (open vnc://127.0.0.1:5901)"
+	$(QEMU) $(QEMU_MACHINE) -display vnc=127.0.0.1:1 -serial stdio -monitor none \
+		$(QEMU_BOOT) -device virtio-gpu-device -device virtio-keyboard-device \
+		-device virtio-mouse-device -audiodev driver=none,id=audio0 \
+		-device virtio-sound-device,audiodev=audio0 \
+		-drive if=none,format=raw,file=$(DISK),id=c26disk \
+		-device virtio-blk-device,drive=c26disk \
+		-netdev user,id=net0 -device virtio-net-device,netdev=net0
 
 smoke:
 	python3 scripts/smoke.py
