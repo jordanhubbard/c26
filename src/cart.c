@@ -465,12 +465,25 @@ static void draw_chrome(int wx, int wy, int cw, int frame_h, const char *title,
     int frame_w = cw + 2 * BORDER;
     uint32_t title_bg = focused ? 0x2b3475 : 0x1b2350;
     uint32_t edge = focused ? 0xd7ddffU : 0x4a5599U;
+    static const int corner[4] = {3, 2, 1, 0}; /* rounded top corners */
     /* soft drop shadow down-right */
     c26_fill_rect(wx + 5, wy + 5, frame_w, frame_h, 0x070a1c);
-    c26_draw_rect(wx, wy, frame_w, frame_h, edge);
-    c26_fill_rect(wx + BORDER, wy + BORDER, cw, TITLE_HEIGHT - BORDER, title_bg);
-    c26_fill_rect(wx + BORDER, wy + BORDER, cw, 2,
-                  focused ? 0x3c4699 : 0x232c63); /* title highlight */
+    /* frame edges, with the top corners knocked in so they read as rounded
+       (the pixels left unpainted keep the already-composited background). */
+    c26_fill_rect(wx + 3, wy, frame_w - 6, 1, edge);            /* top */
+    c26_fill_rect(wx, wy + 3, 1, frame_h - 3, edge);            /* left */
+    c26_fill_rect(wx + frame_w - 1, wy + 3, 1, frame_h - 3, edge); /* right */
+    c26_fill_rect(wx, wy + frame_h - 1, frame_w, 1, edge);      /* bottom */
+    for (int r = 0; r < 4; r++) {
+        c26_fill_rect(wx + corner[r], wy + r, 1, 1, edge);
+        c26_fill_rect(wx + frame_w - 1 - corner[r], wy + r, 1, 1, edge);
+    }
+    /* title bar fill with matching rounded top */
+    for (int r = 0; r < TITLE_HEIGHT - BORDER; r++) {
+        int in = r < 4 ? corner[r] : 0;
+        uint32_t c = r < 2 ? (focused ? 0x3c4699 : 0x232c63) : title_bg;
+        c26_fill_rect(wx + BORDER + in, wy + BORDER + r, cw - 2 * in, 1, c);
+    }
     int dy = wy + (TITLE_HEIGHT - DOT) / 2;
     int d0 = wx + BORDER + DOT_LEFT;
     draw_dot(d0, dy, focused ? (show_close ? COL_CLOSE : 0x6b6f8a) : 0x6b6f8a);
@@ -563,30 +576,124 @@ static void draw_wallpaper(void)
     }
 }
 
-/* The menu bar across the top: a C26 badge, the focused window's name, and a
-   wall-clock (HH:MM, from the RTC). Drawn last so windows tuck under it. */
+/* Working dropdown menus. Each item either feeds BASIC a command, launches a
+   cartridge, or shows an About line. */
+typedef struct {
+    const char *label;
+    int kind; /* 0 feed BASIC, 1 launch cart, 2 about, 3 separator */
+    const char *arg;
+} menu_item_t;
+static const menu_item_t items_c26[] = {
+    {"ABOUT C26", 2, 0}, {"", 3, 0}, {"HELP", 0, "HELP\n"},
+};
+static const menu_item_t items_file[] = {
+    {"NEW", 0, "NEW\n"},   {"LOAD DEMO", 0, "LOAD DEMO\n"},
+    {"RUN", 0, "RUN\n"},   {"", 3, 0}, {"DIRECTORY", 0, "DIR\n"},
+};
+static const menu_item_t items_go[] = {
+    {"CALC", 1, "CALC"},     {"CLOCK", 1, "CLOCK"}, {"PAINT", 1, "PAINT"},
+    {"FILES", 1, "FILES"},   {"EDIT", 1, "EDIT"},   {"MONITOR", 1, "MONITOR"},
+};
+#define MENU_COUNT 3
+static const struct {
+    const char *title;
+    const menu_item_t *items;
+    int n;
+    int x, w;
+} menus[MENU_COUNT] = {
+    {"C26", items_c26, 3, 4, 76},
+    {"FILE", items_file, 5, 236, 56},
+    {"GO", items_go, 6, 310, 44},
+};
+#define MENU_DROP_W 190
+#define MENU_ROW_H 24
+static int menu_open = -1;
+
 static void draw_menu_bar(void)
 {
     c26_fill_rect(0, 0, (int)C26_SCREEN_WIDTH, MENU_H, 0x0d1233);
     c26_fill_rect(0, MENU_H - 1, (int)C26_SCREEN_WIDTH, 1, 0x3a4488);
-    /* C26 badge: a small bright square, like the apple menu. */
+    /* C26 badge (the apple-menu spot) + the clickable menu titles. */
     c26_fill_rect(10, 6, 16, 16, 0x68f0c0);
     c26_fill_rect(13, 9, 10, 10, 0x0d1233);
-    c26_draw_text(34, 6, "C26", 0xffffff, 0x0d1233, 2);
+    for (int i = 0; i < MENU_COUNT; i++) {
+        uint32_t bg = (menu_open == i) ? 0x35409a : 0x0d1233;
+        if (menu_open == i) c26_fill_rect(menus[i].x, 2, menus[i].w, MENU_H - 3, bg);
+        int tx = (i == 0) ? 34 : menus[i].x + 8;
+        c26_draw_text(tx, 6, menus[i].title, 0xffffff, bg, 2);
+    }
     const char *active = focused < 0 ? "BASIC" : procs[focused].name;
-    c26_draw_text(96, 6, active, 0xffd34d, 0x0d1233, 2);
-    c26_draw_text(220, 8, "FILE  EDIT  VIEW  GO", 0x9aa4d8, 0x0d1233, 1);
+    c26_draw_text(100, 6, active, 0xffd34d, 0x0d1233, 2);
     uint64_t s = c26_rtc_seconds();
     unsigned int mm = (unsigned int)((s / 60) % 60);
     unsigned int hh = (unsigned int)((s / 3600) % 24);
-    char clk[6];
-    clk[0] = (char)('0' + hh / 10);
-    clk[1] = (char)('0' + hh % 10);
-    clk[2] = ':';
-    clk[3] = (char)('0' + mm / 10);
-    clk[4] = (char)('0' + mm % 10);
-    clk[5] = '\0';
+    char clk[6] = {(char)('0' + hh / 10), (char)('0' + hh % 10), ':',
+                   (char)('0' + mm / 10), (char)('0' + mm % 10), '\0'};
     c26_draw_text((int)C26_SCREEN_WIDTH - 70, 6, clk, 0xbac4ff, 0x0d1233, 2);
+
+    if (menu_open < 0) return;
+    /* The open dropdown, over everything. */
+    int mx = menus[menu_open].x;
+    int n = menus[menu_open].n;
+    int mh = n * MENU_ROW_H + 8;
+    c26_fill_rect(mx + 4, MENU_H + 4, MENU_DROP_W, mh, 0x070a1c); /* shadow */
+    c26_fill_rect(mx, MENU_H, MENU_DROP_W, mh, 0x141a3a);
+    c26_draw_rect(mx, MENU_H, MENU_DROP_W, mh, 0x4a5599);
+    for (int i = 0; i < n; i++) {
+        int ry = MENU_H + 4 + i * MENU_ROW_H;
+        const menu_item_t *it = &menus[menu_open].items[i];
+        if (it->kind == 3) {
+            c26_fill_rect(mx + 6, ry + MENU_ROW_H / 2, MENU_DROP_W - 12, 1,
+                          0x39427f);
+        } else {
+            c26_draw_text(mx + 14, ry + 4, it->label, 0xdfe4ff, 0x141a3a, 2);
+        }
+    }
+}
+
+static void run_menu_item(const menu_item_t *it)
+{
+    if (it->kind == 1) {
+        c26_cart_run(it->arg);
+    } else if (it->kind == 0) {
+        c26_cart_focus_console();
+        for (const char *p = it->arg; *p != '\0'; p++) c26_basic_feed_char(*p);
+    } else if (it->kind == 2) {
+        c26_cart_focus_console();
+        c26_puts("C26 - the home computer where the C64 grew a desktop.\n");
+    }
+}
+
+/* Route a click to the menus. Returns 1 if the menus consumed it. */
+static int menu_click(int x, int y)
+{
+    if (y < MENU_H) {
+        for (int i = 0; i < MENU_COUNT; i++) {
+            if (x >= menus[i].x && x < menus[i].x + menus[i].w) {
+                menu_open = (menu_open == i) ? -1 : i;
+                scene_dirty = 1;
+                return 1;
+            }
+        }
+        menu_open = -1;
+        scene_dirty = 1;
+        return 1;
+    }
+    if (menu_open >= 0) {
+        int mx = menus[menu_open].x;
+        int n = menus[menu_open].n;
+        int mh = n * MENU_ROW_H + 8;
+        if (x >= mx && x < mx + MENU_DROP_W && y >= MENU_H && y < MENU_H + mh) {
+            int idx = (y - MENU_H - 4) / MENU_ROW_H;
+            if (idx >= 0 && idx < n && menus[menu_open].items[idx].kind != 3) {
+                run_menu_item(&menus[menu_open].items[idx]);
+            }
+        }
+        menu_open = -1;
+        scene_dirty = 1;
+        return 1; /* a click anywhere dismisses the open menu */
+    }
+    return 0;
 }
 
 /* The console as a first-class window: the same chrome as an app (minimize,
@@ -706,6 +813,9 @@ int c26_wm_click(int x, int y, int pressed)
         con_dragging = 0;
         con_resizing = 0;
         return 0;
+    }
+    if (menu_click(x, y)) {
+        return 1;
     }
     if (dock_click(x, y)) {
         return 1;
