@@ -166,7 +166,7 @@ SECOND_BOOT_MARKERS = [
     "Error: not a c26 cartridge",
     # Graphical dock: tiles enumerated from C26FS with click geometry, and a
     # dock click launches PAINT through the pointer hit-test path.
-    "DOCK PAINT 46 940",
+    "DOCK PAINT ",  # the dock enumerated PAINT with a click coordinate
     # Shared clipboard, both directions across the app boundary.
     "PASTE COPYME",   # BASIC round-trip through the kernel clipboard
     "EDIT PASTE 5",   # cart clip_get read what BASIC set ("PIECE")
@@ -374,6 +374,23 @@ def net_app_probe() -> None:
     net_app_reply = udp_probe(NET_APP_PORT, b"HI-C26")
 
 
+# Set by boot_staged so callable stages can drive the guest directly.
+_staged_send = None
+_staged_read = None
+
+
+def dock_click_paint() -> None:
+    """List the (now centred) dock, read PAINT's real centre from the DOCK
+    output, and click exactly there — so the gate follows the layout instead
+    of hard-coding a coordinate."""
+    _staged_send("dock\n")
+    time.sleep(2.0)
+    match = re.search(r"DOCK PAINT (\d+) (\d+)", _staged_read())
+    if match:
+        _staged_send("click %s,%s\n" % (match.group(1), match.group(2)))
+    time.sleep(2.5)
+
+
 # Ctrl-C is a real-time signal, not a queued character: it kills whichever
 # cartridge is running when it arrives. The second boot therefore feeds its
 # input in stages, sending \x03 only once SPIN is definitely running.
@@ -457,8 +474,7 @@ SECOND_BOOT_STAGES = [
     ('q', 2.0),                # quit FILES
     # Graphical dock: list the launcher tiles built from C26FS, then click the
     # PAINT tile through the real pointer hit-test path to launch it.
-    ('dock\n', 2.0, 'DOCK PAINT'),
-    ('click 46,940\n', 3.0, 'PAINT CART ONLINE'),   # the PAINT tile's centre
+    (dock_click_paint, 5.0),   # list the dock, then click PAINT's real centre
     ('\x14kill 0\n', 2.0),     # refocus console and dismiss the launched app
     # Shared clipboard: a BASIC round-trip, then copy/paste crossing the app
     # boundary in both directions — BASIC sets the clipboard and EDIT pastes
@@ -540,6 +556,14 @@ def boot_staged(stages) -> str:
                 time.sleep(0.15)  # let the rest of the line settle
                 return
             time.sleep(0.05)
+
+    def send(text: str) -> None:
+        process.stdin.write(text)
+        process.stdin.flush()
+
+    global _staged_send, _staged_read
+    _staged_send = send
+    _staged_read = lambda: text_from(0)
 
     try:
         for stage in stages:

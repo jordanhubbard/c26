@@ -139,16 +139,17 @@ unsigned int c26_clipboard_get(char *buf, unsigned int cap)
 
 unsigned int c26_clipboard_length(void) { return clipboard_len; }
 
-/* The dock: a persistent launcher bar of app tiles along the screen bottom,
-   rebuilt from C26FS at boot. A click on a tile launches that cartridge. */
-#define DOCK_H 40
-#define DOCK_PAD 8
-#define DOCK_GAP 6
-#define DOCK_MAX 16
+/* The dock: a centred, floating, rounded launcher of app icons at the bottom,
+   rebuilt from C26FS at boot. A click on an icon launches that cartridge. */
+#define DOCK_H 74           /* reserved band at the screen bottom */
+#define DOCK_PANEL_H 60     /* the floating rounded panel */
+#define DOCK_TILE_W 56
+#define DOCK_ICON 34
+#define DOCK_MAX 24
 typedef struct {
     char name[C26_FS_NAME_MAX + 1];
-    int x;
-    int w;
+    int x; /* tile left */
+    int w; /* tile width (DOCK_TILE_W) */
 } dock_tile_t;
 static dock_tile_t dock[DOCK_MAX];
 static int dock_count;
@@ -160,7 +161,6 @@ static int dock_top(void) { return (int)C26_SCREEN_HEIGHT - DOCK_H; }
 void c26_dock_rebuild(void)
 {
     dock_count = 0;
-    int x = DOCK_PAD;
     size_t total = c26_fs_count();
     for (size_t i = 0; i < total && dock_count < DOCK_MAX; i++) {
         const char *name;
@@ -178,10 +178,12 @@ void c26_dock_rebuild(void)
             len++;
         }
         tile->name[len] = '\0';
-        tile->w = len * 12 + 16;
-        tile->x = x;
-        x += tile->w + DOCK_GAP;
+        tile->w = DOCK_TILE_W;
     }
+    /* Centre the row of fixed-width tiles horizontally. */
+    int start = ((int)C26_SCREEN_WIDTH - dock_count * DOCK_TILE_W) / 2;
+    if (start < 4) start = 4;
+    for (int i = 0; i < dock_count; i++) dock[i].x = start + i * DOCK_TILE_W;
 }
 
 /* Report each tile's centre as "DOCK <name> <x> <y>" so a scripted click
@@ -200,15 +202,55 @@ void c26_dock_print(void)
     if (dock_count == 0) c26_puts("DOCK EMPTY\n");
 }
 
+/* A filled rounded rectangle: each row inset near the top/bottom corners so
+   the corners read as rounded (a circular quarter-arc). */
+static void fill_round_rect(int x, int y, int w, int h, int r, uint32_t color)
+{
+    for (int i = 0; i < h; i++) {
+        int d = -1;
+        if (i < r) d = r - i;
+        else if (i >= h - r) d = r - (h - 1 - i);
+        int inset = 0;
+        if (d > 0) {
+            while ((r - inset) * (r - inset) + d * d > r * r && inset < r) {
+                inset++;
+            }
+        }
+        c26_fill_rect(x + inset, y + i, w - 2 * inset, 1, color);
+    }
+}
+
+static const uint32_t dock_palette[8] = {
+    0x3d80ff, 0xffd34d, 0xff5ca8, 0x34c992,
+    0x9b6cff, 0xff8a3d, 0x2fd0d8, 0xf05a7a,
+};
+
 static void dock_draw(void)
 {
-    int y = dock_top();
-    c26_fill_rect(0, y, (int)C26_SCREEN_WIDTH, DOCK_H, 0x1a1a2e);
-    c26_fill_rect(0, y, (int)C26_SCREEN_WIDTH, 2, 0x6570bd);
+    if (dock_count == 0) return;
+    int panel_x = dock[0].x - 8;
+    int panel_w = dock_count * DOCK_TILE_W + 16;
+    int panel_y = (int)C26_SCREEN_HEIGHT - DOCK_PANEL_H - 6;
+    /* the floating, rounded, slightly translucent-looking dock panel */
+    fill_round_rect(panel_x - 1, panel_y - 1, panel_w + 2, DOCK_PANEL_H + 2, 14,
+                    0x3a4488);
+    fill_round_rect(panel_x, panel_y, panel_w, DOCK_PANEL_H, 14, 0x1a2044);
     for (int i = 0; i < dock_count; i++) {
         dock_tile_t *tile = &dock[i];
-        c26_fill_rect(tile->x, y + 6, tile->w, DOCK_H - 12, 0x35409a);
-        c26_draw_text(tile->x + 8, y + 13, tile->name, 0xffffff, 0x35409a, 2);
+        int ix = tile->x + (DOCK_TILE_W - DOCK_ICON) / 2;
+        int iy = panel_y + 6;
+        uint32_t c = dock_palette[i % 8];
+        fill_round_rect(ix, iy, DOCK_ICON, DOCK_ICON, 6, c);
+        /* a bright initial on the icon */
+        char initial[2] = {tile->name[0], '\0'};
+        c26_draw_text(ix + DOCK_ICON / 2 - 5, iy + DOCK_ICON / 2 - 7, initial,
+                      0xffffff, c, 2);
+        /* the app name in small text (6px/char), centred under the icon */
+        int nlen = 0;
+        while (tile->name[nlen] != '\0') nlen++;
+        int label_x = tile->x + DOCK_TILE_W / 2 - nlen * 3;
+        c26_draw_text(label_x, panel_y + DOCK_PANEL_H - 12, tile->name,
+                      0xbac4ff, 0x1a2044, 1);
     }
 }
 
@@ -494,6 +536,9 @@ static void con_ensure_size(void)
     if (con_w == 0) {
         con_w = c26_console_pixel_width();
         con_h = c26_console_pixel_height();
+        int avail = (int)C26_SCREEN_HEIGHT - con_y - TITLE_HEIGHT - BORDER -
+                    DOCK_H - 4;
+        if (con_h > avail) con_h = avail;
     }
 }
 static int con_frame_w(void) { con_ensure_size(); return con_w + 2 * BORDER; }
