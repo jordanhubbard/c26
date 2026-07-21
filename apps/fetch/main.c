@@ -21,18 +21,50 @@ static void put_uint(const c26_api_t *api, uint32_t v)
     api->put_int((int64_t)v);
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api, const char *status)
 {
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, 24, 0x222957);
-    api->text(6, 4, "FETCH", 0xffffff, 0x222957, 2);
-    api->text((int)width - 120, 8, "ENTER GO Q QUIT", 0x9df6ff, 0x222957, 1);
+    vgrad(api, 0, 0, (int)width, (int)height, 0x141a36, 0x0a0e20);
+    /* glossy title bar */
+    vgrad(api, 0, 0, (int)width, 24, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x4a56b4);   /* bright top highlight */
+    api->fill_rect(0, 23, (int)width, 1, 0x0a0e20);  /* dark seam shadow */
+    label_fg(api, 6, 4, "FETCH", 0xffffff, 0x30397e, 2);
+    label_fg(api, (int)width - 120, 8, "ENTER GO Q QUIT", 0x9df6ff, 0x30397e, 1);
 
-    api->fill_rect(4, 28, (int)width - 8, 22, 0x1a2140);
-    api->text(8, 32, "http://", 0x6570bd, 0x1a2140, 2);
+    /* recessed URL/status bar */
+    vgrad(api, 4, 28, (int)width - 8, 22, 0x0c1226, 0x060a18);
+    api->fill_rect(4, 28, (int)width - 8, 1, 0x04060e);
+    label_fg(api, 8, 32, "http://", 0x6570bd, 0x0c1226, 2);
     host[host_len] = '\0';
-    api->text(90, 32, host, 0x68f0c0, 0x1a2140, 2);
-    api->text(8, 54, status, 0xffd34d, 0x0b1025, 1);
+    label_fg(api, 90, 32, host, 0x68f0c0, 0x0c1226, 2);
+    label_fg(api, 8, 54, status, 0xffd34d, 0x141a36, 1);
+
+    /* recessed "screen" behind the response body */
+    vgrad(api, 4, 64, (int)width - 8, (int)height - 68, 0x0c1226, 0x060a18);
+    api->fill_rect(4, 64, (int)width - 8, 1, 0x04060e);
 
     /* Response body: draw as wrapped lines below the input. */
     int y = 70;
@@ -44,7 +76,7 @@ static void draw(const c26_api_t *api, const char *status)
         char c = resp[i];
         if (c == '\n' || col >= line_w || n >= 126) {
             line[n] = '\0';
-            api->text(8, y, line, 0xbac4ff, 0x0b1025, 1);
+            label_fg(api, 8, y, line, 0xbac4ff, 0x0c1226, 1);
             y += 12;
             n = 0;
             col = 0;
@@ -56,7 +88,7 @@ static void draw(const c26_api_t *api, const char *status)
     }
     if (n > 0 && y < (int)height - 12) {
         line[n] = '\0';
-        api->text(8, y, line, 0xbac4ff, 0x0b1025, 1);
+        label_fg(api, 8, y, line, 0xbac4ff, 0x0c1226, 1);
     }
 }
 

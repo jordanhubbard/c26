@@ -140,36 +140,91 @@ static void step(const c26_api_t *api)
     }
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
+/* Draw one glossy beveled cell (bright top fading to dark bottom). */
+static void gloss_cell(const c26_api_t *api, int px, int py, int size,
+                       uint32_t base)
+{
+    vgrad(api, px, py, size, size, cmix(base, 0xffffff, 60),
+          cmix(base, 0x000000, 55));
+    api->fill_rect(px, py, size, 2, cmix(base, 0xffffff, 130));
+    api->fill_rect(px, py + size - 1, size, 1, cmix(base, 0x000000, 150));
+}
+
 static void draw(const c26_api_t *api)
 {
-    /* Background and title bar. */
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, TOP, 0x222957);
-    api->text(6, 4, "SNAKE", 0xffffff, 0x222957, 2);
+    /* Playfield: a subtle vertical gradient with a very faint grid tint so the
+       cells read without stealing attention from the snake. */
+    vgrad(api, 0, 0, (int)width, (int)height, 0x0c1330, 0x060a1c);
+    for (int gy = 0; gy < grid_h; gy++) {
+        for (int gx = (gy & 1); gx < grid_w; gx += 2) {
+            api->fill_rect(gx * CELL, TOP + gy * CELL, CELL - 1, CELL - 1,
+                           0x0d1636);
+        }
+    }
+
+    /* Glossy title/score bar: bright top highlight, dark seam shadow. */
+    vgrad(api, 0, 0, (int)width, TOP, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x5866c4);
+    api->fill_rect(0, TOP - 1, (int)width, 1, 0x04060e);
+    label_fg(api, 6, 4, "SNAKE", 0xffffff, 0x30397e, 2);
 
     char buf[16];
     format_int(score, buf);
-    api->text((int)width - 70, 4, "SCORE", 0x9fb0ff, 0x222957, 1);
-    api->text((int)width - 70, 13, buf, 0x68f0c0, 0x222957, 1);
+    label_fg(api, (int)width - 70, 4, "SCORE", 0x9fb0ff, 0x30397e, 1);
+    label_fg(api, (int)width - 70, 13, buf, 0x68f0c0, 0x30397e, 1);
 
-    /* Food. */
-    api->fill_rect(food_x * CELL, TOP + food_y * CELL, CELL - 1, CELL - 1,
-                   0xff5a5a);
+    /* Food: a glossy red disc with a bright specular highlight. */
+    {
+        int fx = food_x * CELL;
+        int fy = TOP + food_y * CELL;
+        gloss_cell(api, fx, fy, CELL - 1, 0xff5f57);
+        /* Little specular spot near the top-left. */
+        api->fill_rect(fx + 3, fy + 3, 3, 3, cmix(0xff5f57, 0xffffff, 190));
+    }
 
-    /* Snake: a brighter head, softer body. */
+    /* Snake: glossy beveled beads; a distinct brighter head with an eye. */
     for (int i = 0; i < len; i++) {
-        uint32_t color = (i == 0) ? 0xbfffd0 : 0x3fb56a;
-        api->fill_rect(body[i].x * CELL, TOP + body[i].y * CELL, CELL - 1,
-                       CELL - 1, color);
+        int px = body[i].x * CELL;
+        int py = TOP + body[i].y * CELL;
+        uint32_t base = (i == 0) ? 0x68f0c0 : 0x2fbf5a;
+        gloss_cell(api, px, py, CELL - 1, base);
+        if (i == 0) {
+            /* A tiny eye highlight on the head. */
+            api->fill_rect(px + CELL / 2, py + 3, 2, 2, 0x0a1a12);
+        }
     }
 
     if (game_over) {
         int bx = (int)width / 2 - 90;
         int by = (int)height / 2 - 24;
-        api->fill_rect(bx, by, 180, 48, 0x1a2140);
-        api->draw_rect(bx, by, 180, 48, 0xff5a5a);
-        api->text(bx + 18, by + 6, "GAME OVER", 0xffd34d, 0x1a2140, 2);
-        api->text(bx + 20, by + 30, "PRESS A KEY", 0x9fb0ff, 0x1a2140, 1);
+        vgrad(api, bx, by, 180, 48, 0x232b58, 0x11162e);
+        api->fill_rect(bx, by, 180, 1, 0x5866c4);
+        api->draw_rect(bx, by, 180, 48, 0xff5f57);
+        label_fg(api, bx + 18, by + 6, "GAME OVER", 0xffd34d, 0x1a2140, 2);
+        label_fg(api, bx + 20, by + 30, "PRESS A KEY", 0x9fb0ff, 0x1a2140, 1);
     }
 }
 

@@ -94,6 +94,30 @@ static int is_alpha(char c)
 
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
 
+/* Aqua-gloss drawing helpers (same shading the desktop uses). */
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 /* ------------------------------------------------------------------ */
 /* Lexer: turn the source into a flat token stream                     */
 
@@ -626,14 +650,30 @@ static int compile(const char *src_name, const char *dst_name)
 
 static void draw(void)
 {
-    ui_clear(&ui);
+    const c26_api_t *api = g_api;
+    int w = (int)ui.width;
+    int h = (int)ui.height;
+
+    /* subtle window background gradient */
+    vgrad(api, 0, 0, w, h, 0x141a36, 0x0a0e20);
+    ui.dirty = 1;
+
+    /* glossy title bar + status (the toolkit already draws these Aqua-glossed) */
     ui_titlebar(&ui, "TINYC", "SRC DST + ENTER  Q QUIT");
-    ui_text(&ui, 12, 44, "TINY C -> RV64 CARTRIDGE COMPILER", UI_TEXT);
-    ui_text(&ui, 12, 72, "INPUT:", UI_TEXT);
-    ui_text(&ui, 100, 72, status_line, UI_BRIGHT);
+
+    /* recessed code screen behind the source/output working area */
+    int sy = 38;
+    int sh = h - 24 - sy - 2;
+    vgrad(api, 6, sy, w - 12, sh, 0x0c1226, 0x060a18);
+    api->fill_rect(6, sy, w - 12, 1, 0x04060e);
+
+    label_fg(api, 12, 44, "TINY C -> RV64 CARTRIDGE COMPILER", UI_TEXT, 0x0c1226, 2);
+    label_fg(api, 12, 72, "INPUT:", UI_TEXT, 0x0c1226, 2);
+    label_fg(api, 100, 72, status_line, UI_BRIGHT, 0x0c1226, 2);
     if (error_line[0] != '\0') {
-        ui_text(&ui, 12, 100, error_line, UI_WARN);
+        label_fg(api, 12, 100, error_line, UI_WARN, 0x0c1226, 2);
     }
+
     ui_status(&ui, "OUTPUT RUNS WITH: RUN DST", UI_TEXT);
 }
 

@@ -28,17 +28,73 @@ static void log_add(const char *text)
     log_count++;
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(void)
 {
-    ui_clear(&ui);
-    ui_titlebar(&ui, "NET", "UDP 2601  Q QUIT");
+    const c26_api_t *api = ui.api;
+    int w = (int)ui.width;
+    int h = (int)ui.height;
+
+    /* subtle window background gradient */
+    vgrad(api, 0, 0, w, h, 0x141a36, 0x0a0e20);
+
+    /* glossy title bar */
+    vgrad(api, 0, 0, w, 30, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, w, 1, 0x4a56b4);  /* bright top highlight */
+    api->fill_rect(0, 29, w, 1, 0x0a0e20); /* dark seam shadow */
+    label_fg(api, 8, 5, "NET", 0xffffff, 0x30397e, 3);
+    {
+        const char *hint = "UDP 2601  Q QUIT";
+        int length = 0;
+        while (hint[length] != '\0') length++;
+        label_fg(api, w - 12 * length - 8, 9, hint, 0xbac4ff, 0x30397e, 2);
+    }
+
     if (log_count == 0) {
-        ui_text(&ui, 10, 30, "WAITING FOR DATAGRAMS...", UI_TEXT);
+        label_fg(api, 10, 30, "WAITING FOR DATAGRAMS...", 0xbac4ff, 0x0a0e20, 2);
     }
     for (int i = 0; i < log_count; i++) {
-        ui_text(&ui, 10, 30 + i * 14, log_lines[i], UI_GOOD);
+        int y = 30 + i * 14;
+        int last = (i == log_count - 1);
+        if (last) { /* accent the most recent arrival */
+            vgrad(api, 4, y, w - 8, 14, 0x4653b4, 0x2f3894);
+            api->fill_rect(4, y, w - 8, 1, 0x5a67c8); /* top highlight line */
+        }
+        label_fg(api, 10, y, log_lines[i], last ? 0xffffff : 0x68f0c0,
+                 last ? 0x4653b4 : 0x0a0e20, 2);
     }
-    ui_status(&ui, "EVERY DATAGRAM IS ACKED", UI_TEXT);
+
+    /* glossy status line */
+    {
+        int y = h - 24;
+        vgrad(api, 0, y, w, 24, 0x30397e, 0x191f48);
+        api->fill_rect(0, y, w, 1, 0x4a56b4);      /* bright top highlight */
+        api->fill_rect(0, y + 23, w, 1, 0x0a0e20); /* dark seam shadow */
+        label_fg(api, 8, y + 5, "EVERY DATAGRAM IS ACKED", 0xbac4ff, 0x30397e, 2);
+    }
+    ui.dirty = 1;
 }
 
 int app_main(const c26_api_t *api)

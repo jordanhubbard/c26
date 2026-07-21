@@ -777,17 +777,71 @@ static int assemble(const char *src_name, const char *dst_name)
 /* ------------------------------------------------------------------ */
 /* UI                                                                  */
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(void)
 {
-    ui_clear(&ui);
-    ui_titlebar(&ui, "ASM", "SRC DST + ENTER  Q QUIT");
-    ui_text(&ui, 12, 44, "TWO-PASS RV64 ASSEMBLER", UI_TEXT);
-    ui_text(&ui, 12, 72, "INPUT:", UI_TEXT);
-    ui_text(&ui, 100, 72, status_line, UI_BRIGHT);
-    if (error_line[0] != '\0') {
-        ui_text(&ui, 12, 100, error_line, UI_WARN);
+    const c26_api_t *api = ui.api;
+    int w = (int)ui.width;
+    int h = (int)ui.height;
+
+    /* subtle window background gradient */
+    vgrad(api, 0, 0, w, h, 0x141a36, 0x0a0e20);
+
+    /* glossy title bar */
+    vgrad(api, 0, 0, w, 30, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, w, 1, 0x4a56b4);  /* bright top highlight */
+    api->fill_rect(0, 29, w, 1, 0x0a0e20); /* dark seam shadow */
+    label_fg(api, 8, 5, "ASM", 0xffffff, 0x30397e, 3);
+    {
+        const char *hint = "SRC DST + ENTER  Q QUIT";
+        int length = 0;
+        while (hint[length] != '\0') length++;
+        label_fg(api, w - 12 * length - 8, 9, hint, 0xbac4ff, 0x30397e, 2);
     }
-    ui_status(&ui, "OUTPUT RUNS WITH: RUN DST", UI_TEXT);
+
+    /* recessed "code screen" behind the listing/output area */
+    int sx = 6, sy = 38, sw = w - 12, sh = h - 68;
+    vgrad(api, sx, sy, sw, sh, 0x0c1226, 0x060a18);
+    api->fill_rect(sx, sy, sw, 1, 0x04060e); /* recessed top shadow */
+
+    label_fg(api, 12, 44, "TWO-PASS RV64 ASSEMBLER", 0xbac4ff, 0x0c1226, 2);
+    label_fg(api, 12, 72, "INPUT:", 0xbac4ff, 0x0c1226, 2);
+    label_fg(api, 100, 72, status_line, 0xffffff, 0x0c1226, 2);
+    if (error_line[0] != '\0') {
+        label_fg(api, 12, 100, error_line, 0xffd34d, 0x0c1226, 2);
+    }
+
+    /* glossy status line */
+    {
+        int y = h - 24;
+        vgrad(api, 0, y, w, 24, 0x30397e, 0x191f48);
+        api->fill_rect(0, y, w, 1, 0x4a56b4);      /* bright top highlight */
+        api->fill_rect(0, y + 23, w, 1, 0x0a0e20); /* dark seam shadow */
+        label_fg(api, 8, y + 5, "OUTPUT RUNS WITH: RUN DST", 0xbac4ff, 0x30397e, 2);
+    }
+    ui.dirty = 1;
 }
 
 int app_main(const c26_api_t *api)
