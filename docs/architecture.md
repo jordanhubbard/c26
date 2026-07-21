@@ -10,8 +10,17 @@ services. UART0 at `0x10000000` remains the diagnostic and serial-input path.
 handler in `src/interrupts.c`. A periodic CLINT interrupt supplies ticks. The
 PLIC routes UART IRQ 10 and virtio IRQs 1-8; UART receive data is buffered by
 its handler and virtio sources are acknowledged before their used rings are
-drained. After servicing application work, the single hart sleeps with `WFI`
-until the next timer or device interrupt.
+drained. Between application work a hart sleeps with `WFI` until its next timer
+or device interrupt.
+
+The machine is SMP: hart 0 boots the system and owns the interactive machine
+(devices, compositor, console, BASIC/Scheme), while secondary harts run U-mode
+application processes in parallel. A single recursive big kernel lock
+(`c26_kernel_lock`) serialises all shared kernel state; a hart holds it only in
+the kernel and drops it around U-mode execution, so app code on two cores runs
+truly concurrently. Secondary harts never run interpreter/console teardown —
+they defer an exiting process to hart 0's reaper — and take only their own CLINT
+timer (device IRQs stay on hart 0). `-smp N` scales the core count.
 
 ## Device transport
 

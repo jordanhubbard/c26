@@ -23,7 +23,7 @@ replacing magic memory addresses with typed SDK calls.
 
 | Capability | c26 contract |
 | --- | --- |
-| CPU | One RV64IMAC hart, freestanding execution |
+| CPU | SMP RV64IMAC (default 2 harts, -smp N); hart 0 owns UI/devices, secondaries run apps |
 | Interrupts | CLINT timer and PLIC-routed UART/virtio IRQs; WFI idle |
 | Storage | 8 MiB virtio-block disk; C26FS v2: 64 files, 128 KiB, delete/rename |
 | Cartridges | Flat RV64 binaries from C26FS via the c26_api.h vector table |

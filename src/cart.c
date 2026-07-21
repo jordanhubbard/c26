@@ -72,6 +72,9 @@ typedef struct {
     c26_vm_space_t space;
     int kill_pending;
     int surface_damaged;
+    int owner_hart; /* hart currently running this process, or -1 if idle */
+    int exiting;    /* exited on a secondary hart; awaiting reap by hart 0 */
+    long exit_code; /* the code to finalize with, captured at exit */
     /* Window geometry: content is [0,w) x [0,h) of the surface. */
     int win_x;
     int win_y;
@@ -85,9 +88,56 @@ typedef struct {
     unsigned int mail_tail;
 } proc_t;
 
-c26_user_frame_t *c26_current_frame;
-uint64_t c26_kernel_trap_sp;
-uint64_t c26_kernel_context[14];
+c26_user_frame_t *c26_current_frame[C26_NHART];
+uint64_t c26_kernel_trap_sp[C26_NHART];
+uint64_t c26_kernel_context[C26_NHART][C26_KCTX_WORDS];
+
+/* The hart (RISC-V core) executing this code, from mhartid. */
+static inline int cpuid(void)
+{
+    uint64_t id;
+    __asm__ volatile("csrr %0, mhartid" : "=r"(id));
+    return (int)id;
+}
+
+/* ------------------------------------------------------------------ */
+/* SMP: the big kernel lock. One recursive spinlock serialises all shared
+   kernel state (console, FS, compositor, audio, IPC, the proc table) across
+   harts. A hart holds it only while in the kernel and releases it around
+   U-mode execution and idle.
+
+   It does NOT disable interrupts: hart 0's interactive loop must keep running
+   with interrupts on exactly as it always has, and app syscalls already run in
+   trap context (interrupts off in hardware). Same-hart reentrancy — hart 0
+   taking a device interrupt while holding the lock in the compositor — is made
+   safe by recursion (the handler re-takes the lock it already owns), which is
+   no worse than the pre-SMP behaviour of an interrupt landing mid-poll. */
+static volatile int bkl_locked;
+static volatile int bkl_owner = -1;
+static int bkl_depth;
+
+void c26_kernel_lock(void)
+{
+    int me = cpuid();
+    if (bkl_owner == me) {
+        bkl_depth++;
+        return;
+    }
+    while (__sync_lock_test_and_set(&bkl_locked, 1) != 0) {
+        while (bkl_locked) { /* spin until the owner releases */ }
+    }
+    bkl_owner = me;
+    bkl_depth = 1;
+}
+
+void c26_kernel_unlock(void)
+{
+    if (--bkl_depth > 0) {
+        return;
+    }
+    bkl_owner = -1;
+    __sync_lock_release(&bkl_locked);
+}
 
 static proc_t procs[C26_NPROC];
 static uint8_t proc_stack[C26_NPROC][USER_STACK_BYTES]
@@ -96,11 +146,22 @@ static char proc_scratch[C26_NPROC][4096] __attribute__((aligned(4096)));
 static uint32_t proc_surface[C26_NPROC][SURFACE_PIXELS]
     __attribute__((aligned(4096)));
 
-static int current = -1;
+/* Per-hart scheduler state: which process each hart runs, and its remaining
+   time slice. The `current`/`slice_ticks_left` macros transparently select the
+   running hart's slot, so the existing single-hart code reads unchanged. */
+static int hart_current[C26_NHART] = {-1, -1, -1, -1};
+static volatile int hart_slice[C26_NHART];
+/* A syscall (EXIT/YIELD) that must terminate the process records it here rather
+   than calling c26_user_terminate directly — that would never return and leak
+   the big kernel lock. The trap handler releases the lock, then terminates. */
+static int hart_term_pending[C26_NHART];
+static long hart_term_code[C26_NHART];
+_Static_assert(C26_NHART == 4, "hart_current initialiser matches C26_NHART");
+#define current (hart_current[cpuid()])
+#define slice_ticks_left (hart_slice[cpuid()])
 static int focused = -1;
 static int rr_cursor;
 static int scene_dirty;
-static volatile int slice_ticks_left;
 
 static int z_order[C26_NPROC];
 static int z_count;
@@ -851,6 +912,9 @@ static void z_raise(int job)
 
 static void drain_typeahead(void)
 {
+    /* Replaying type-ahead runs the BASIC interpreter, which is hart 0's alone;
+       a secondary must never step into it. Hart 0 drains on its next loop. */
+    if (cpuid() != 0) return;
     /* Stops as soon as a replayed line hands the queue to a new consumer
        (a BASIC RUN or another spawn), else pop/feed would cycle forever. */
     char ch;
@@ -1650,7 +1714,9 @@ static long do_syscall(c26_user_frame_t *frame)
 
     switch (number) {
     case C26_SYS_EXIT:
-        c26_user_terminate((long)(int64_t)a0);
+        hart_term_pending[cpuid()] = 1;
+        hart_term_code[cpuid()] = (long)(int64_t)a0;
+        return 0;
     case C26_SYS_PUTS: {
         const char *text = user_string(a0);
         if (text == 0) break;
@@ -1698,7 +1764,9 @@ static long do_syscall(c26_user_frame_t *frame)
     case C26_SYS_TICKS:
         return (long)c26_interrupt_ticks();
     case C26_SYS_YIELD:
-        c26_user_terminate(EXIT_SLICE);
+        hart_term_pending[cpuid()] = 1;
+        hart_term_code[cpuid()] = EXIT_SLICE;
+        return 0;
     case C26_SYS_FRAMEBUFFER:
         return (long)(uintptr_t)proc_surface[current];
     case C26_SYS_PIXEL:
@@ -1934,7 +2002,11 @@ static long do_syscall(c26_user_frame_t *frame)
     c26_user_terminate(-1);
 }
 
-void c26_trap_handler_user(c26_user_frame_t *frame)
+/* Returns TRAP_RESUME to resume the app, or a process exit code to terminate
+   it. Runs entirely under the big kernel lock; the caller releases the lock
+   before the (non-returning) c26_user_terminate so the lock is never leaked. */
+#define TRAP_RESUME 0x7fff0002L
+static long handle_user_trap(c26_user_frame_t *frame)
 {
     uint64_t cause = read_csr_mcause();
     if ((cause & (1ULL << 63)) != 0) {
@@ -1951,24 +2023,40 @@ void c26_trap_handler_user(c26_user_frame_t *frame)
             c26_basic_clear_break();
         }
         if (current >= 0 && procs[current].kill_pending) {
-            c26_user_terminate(-3);
+            return -3;
         }
         if (slice_ticks_left <= 0) {
-            c26_user_terminate(EXIT_SLICE);
+            return EXIT_SLICE;
         }
-        return;
+        return TRAP_RESUME;
     }
     if (cause == 8) { /* ecall from U-mode */
         frame->mepc += 4;
-        C26_FRAME_X(frame, 10) = (uint64_t)do_syscall(frame);
-        return;
+        long result = do_syscall(frame);
+        int me = cpuid();
+        if (hart_term_pending[me]) { /* EXIT/YIELD asked to end the slice/proc */
+            hart_term_pending[me] = 0;
+            return hart_term_code[me];
+        }
+        C26_FRAME_X(frame, 10) = (uint64_t)result;
+        return TRAP_RESUME;
     }
     c26_puts("CART FAULT cause=");
     c26_put_hex(cause);
     c26_puts(" addr=");
     c26_put_hex(read_csr_mtval());
     c26_putc('\n');
-    c26_user_terminate(-1);
+    return -1;
+}
+
+void c26_trap_handler_user(c26_user_frame_t *frame)
+{
+    c26_kernel_lock();
+    long action = handle_user_trap(frame);
+    c26_kernel_unlock();
+    if (action != TRAP_RESUME) {
+        c26_user_terminate(action);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1985,6 +2073,8 @@ static void finalize(int index, long code)
     anim_close_active = 1;
     procs[index].state = PROC_FREE;
     procs[index].kill_pending = 0;
+    procs[index].exiting = 0;
+    procs[index].owner_hart = -1;
     z_remove(index);
     scene_dirty = 1;
     if (dragging == index) {
@@ -2069,6 +2159,8 @@ int c26_cart_run(const char *name)
         (uint64_t)(uintptr_t)proc_stack[slot] + USER_STACK_BYTES;
     C26_FRAME_X(&process->frame, 10) = (uint64_t)(uintptr_t)c26_user_api;
     process->kill_pending = 0;
+    process->owner_hart = -1; /* set under the lock, before state=RUNNABLE */
+    process->exiting = 0;
     process->surface_damaged = 1;
     process->win_w = WINDOW_DEFAULT_W;
     process->win_h = WINDOW_DEFAULT_H;
@@ -2097,7 +2189,9 @@ int c26_cart_run(const char *name)
 int c26_cart_any_runnable(void)
 {
     for (int i = 0; i < C26_NPROC; i++) {
-        if (procs[i].state == PROC_RUNNABLE) {
+        /* Only processes not already claimed by another hart are schedulable
+           here; otherwise this hart would busy-spin instead of idling. */
+        if (procs[i].state == PROC_RUNNABLE && procs[i].owner_hart < 0) {
             return 1;
         }
     }
@@ -2192,31 +2286,115 @@ void c26_cart_list_jobs(void)
     }
 }
 
-void c26_cart_schedule(void)
+/* Which harts have entered their scheduler loop, for the boot report. */
+static volatile int hart_online[C26_NHART];
+
+int c26_hart_count(void)
+{
+    int n = 0;
+    for (int i = 0; i < C26_NHART; i++) n += hart_online[i];
+    return n;
+}
+
+void c26_hart_mark_online(void)
+{
+    hart_online[cpuid()] = 1;
+}
+
+/* A secondary hart: bring up its own timer/trap CSRs, announce itself, then
+   run app processes forever — pulling any process no other hart has claimed
+   and idling (WFI) when there is nothing to run. The desktop, console, and
+   devices stay on hart 0; a secondary only touches shared state through the
+   big kernel lock (in c26_cart_schedule and the syscall path). */
+void c26_secondary_main(void)
+{
+    c26_hart_init();
+    c26_kernel_lock();
+    hart_online[cpuid()] = 1;
+    c26_puts("SMP HART ");
+    c26_put_uint((uint64_t)cpuid());
+    c26_puts(" ONLINE\n");
+    c26_kernel_unlock();
+    for (;;) {
+        if (c26_cart_any_runnable()) {
+            c26_cart_schedule();
+        } else {
+            c26_idle();
+        }
+    }
+}
+
+/* Run one time slice of one process on the calling hart. Shared by hart 0's
+   main loop and every secondary's scheduler loop. Bookkeeping (proc pick,
+   finalize, satp) runs under the big kernel lock; the lock is dropped around
+   c26_user_enter so several harts execute U-mode app code in parallel. */
+/* Hart 0 only: finalize processes that exited on a secondary hart or were
+   killed while idle, so all teardown (focus, console, type-ahead replay) runs
+   on the interactive hart. Must be called under the big kernel lock. */
+void c26_cart_reap_exited(void)
 {
     for (int i = 0; i < C26_NPROC; i++) {
-        if (procs[i].state == PROC_RUNNABLE && procs[i].kill_pending) {
+        if (procs[i].state != PROC_RUNNABLE || procs[i].owner_hart >= 0) {
+            continue;
+        }
+        if (procs[i].exiting) {
+            finalize(i, procs[i].exit_code);
+        } else if (procs[i].kill_pending) {
             finalize(i, -3);
         }
     }
+}
+
+void c26_cart_schedule(void)
+{
+    c26_kernel_lock();
+    int me = cpuid();
     int next = -1;
     for (int step = 0; step < C26_NPROC; step++) {
         int candidate = (rr_cursor + step) % C26_NPROC;
-        if (procs[candidate].state == PROC_RUNNABLE) {
+        if (procs[candidate].state == PROC_RUNNABLE &&
+            !procs[candidate].exiting && procs[candidate].owner_hart < 0) {
             next = candidate;
             break;
         }
     }
     if (next < 0) {
+        c26_kernel_unlock();
         return;
     }
     rr_cursor = (next + 1) % C26_NPROC;
+    procs[next].owner_hart = me; /* claim it so no other hart runs it too */
     current = next;
     slice_ticks_left = SLICE_TICKS;
-    c26_vm_activate(&procs[next].space);
-    long code = c26_user_enter(&procs[next].frame);
-    current = -1;
-    if (code != EXIT_SLICE) {
-        finalize(next, code);
+    if (me != 0) { /* announce parallel execution once per secondary hart */
+        static int announced[C26_NHART];
+        if (!announced[me]) {
+            announced[me] = 1;
+            c26_puts("JOB ");
+            c26_put_uint((uint64_t)next);
+            c26_puts(" ON HART ");
+            c26_put_uint((uint64_t)me);
+            c26_putc('\n');
+        }
     }
+    c26_vm_activate(&procs[next].space);
+    c26_kernel_unlock();
+
+    long code = c26_user_enter(&procs[next].frame);
+
+    c26_kernel_lock();
+    current = -1;
+    if (code == EXIT_SLICE) {
+        procs[next].owner_hart = -1; /* time slice ended; stays runnable */
+    } else if (me == 0) {
+        procs[next].owner_hart = -1;
+        finalize(next, code); /* teardown on the interactive hart */
+    } else {
+        /* A secondary must not run finalize (focus/console/interpreter live on
+           hart 0). Hand the exit to hart 0's reaper. */
+        procs[next].exit_code = code;
+        procs[next].exiting = 1;
+        procs[next].owner_hart = -1;
+    }
+    c26_kernel_unlock();
 }

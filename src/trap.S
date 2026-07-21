@@ -115,11 +115,18 @@ trap_from_user:
     csrr t0, mepc
     sd t0, C26_FRAME_MEPC(sp)
     mv a0, sp
+    /* Switch to this hart's kernel trap stack: c26_kernel_trap_sp[mhartid]. */
+    csrr t2, mhartid
+    slli t2, t2, 3
     la t1, c26_kernel_trap_sp
+    add t1, t1, t2
     ld sp, 0(t1)
     call c26_trap_handler_user
-    /* Resume whichever frame the scheduler selected. */
+    /* Resume whichever frame the scheduler selected for this hart. */
+    csrr t2, mhartid
+    slli t2, t2, 3
     la t6, c26_current_frame
+    add t6, t6, t2
     ld t6, 0(t6)
     ld t0, C26_FRAME_MEPC(t6)
     csrw mepc, t0
@@ -165,7 +172,13 @@ c26_user_enter:
        would record this kernel code as resumable user state. */
     li t0, 8
     csrc mstatus, t0
+    /* Per-hart slots: t1 = mhartid, t3 = hart*8, save context at hart*112. */
+    csrr t1, mhartid
+    slli t3, t1, 3
+    li t2, C26_KCTX_STRIDE
+    mul t2, t1, t2
     la t0, c26_kernel_context
+    add t0, t0, t2
     sd ra,  0(t0)
     sd sp,  8(t0)
     sd s0,  16(t0)
@@ -181,8 +194,10 @@ c26_user_enter:
     sd s10, 96(t0)
     sd s11, 104(t0)
     la t0, c26_kernel_trap_sp
+    add t0, t0, t3
     sd sp, 0(t0)
     la t0, c26_current_frame
+    add t0, t0, t3
     sd a0, 0(t0)
     /* mstatus: previous privilege U, previous interrupt-enable on. */
     li t0, (3 << 11)
@@ -236,7 +251,12 @@ c26_user_terminate:
     csrw mscratch, zero
     li t0, 8
     csrs mstatus, t0
+    /* Restore this hart's saved kernel context: c26_kernel_context[mhartid]. */
+    csrr t1, mhartid
+    li t2, C26_KCTX_STRIDE
+    mul t2, t1, t2
     la t0, c26_kernel_context
+    add t0, t0, t2
     ld ra,  0(t0)
     ld sp,  8(t0)
     ld s0,  16(t0)

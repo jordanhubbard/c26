@@ -27,6 +27,9 @@ FIRST_BOOT_MARKERS = [
     "C26FS: formatted new disk",
     "C26FS: mounted 0 file(s)",
     "FRAMEBUFFER: virtio-gpu scanout 2560x1440x32",
+    # SMP: the second RISC-V core comes online and hart 0 reports the count.
+    "SMP HART 1 ONLINE",
+    "SMP: 2 harts online",
     "VIRTIO INPUT: 2 device(s) online",
     "VIRTIO NET: online 10.0.2.15",
     "UDP ECHO SERVICE: port 2600",
@@ -115,6 +118,9 @@ SECOND_BOOT_MARKERS = [
     # Multiprocessing: TICKER keeps running while the console answers.
     "TICKER CART ONLINE",
     "TICK",
+    # SMP: an app process actually executed on the secondary hart, in parallel
+    # with the desktop/BASIC on hart 0.
+    " ON HART 1",
     "JOB 0  TICKER",
     "41001",
     "51001",
@@ -299,6 +305,8 @@ def qemu_command() -> list[str]:
         "rv64",
         "-m",
         "256M",
+        "-smp",
+        "2",
         "-display",
         "none",
         "-serial",

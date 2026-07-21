@@ -44,6 +44,7 @@ void c26_scheme_enter(void);
 void c26_scheme_leave(void);
 int c26_scheme_feed(const char *line);
 void c26_cart_schedule(void);
+void c26_cart_reap_exited(void);
 int c26_cart_any_runnable(void);
 int c26_cart_kill(int job);
 int c26_cart_move_window(int job, int x, int y);
@@ -83,6 +84,17 @@ void c26_interrupts_init(void);
 uint64_t c26_interrupt_ticks(void);
 uint64_t c26_interrupt_external_count(void);
 void c26_idle(void);
+
+/* SMP big kernel lock (defined in cart.c): serialises shared kernel state
+   across harts. Recursive per-hart; disables this hart's interrupts while held.
+   c26_hart_start brings a secondary hart into its scheduler loop. */
+void c26_kernel_lock(void);
+void c26_kernel_unlock(void);
+void c26_secondary_main(void) __attribute__((noreturn));
+void c26_hart_init(void);
+int c26_hart_count(void);
+uint64_t c26_hart_ticks(int hart);
+void c26_hart_mark_online(void);
 uint64_t c26_rtc_seconds(void);
 void c26_poweroff(void) __attribute__((noreturn));
 

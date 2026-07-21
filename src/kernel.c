@@ -4,6 +4,9 @@
 #include "c26_fs.h"
 #include "c26_net.h"
 
+/* Released by hart 0 once init is done; secondary harts spin on it in boot.S. */
+volatile int c26_secondary_go;
+
 void kmain(void)
 {
     c26_puts("\nC26 RISC-V HOME COMPUTER\n");
@@ -35,8 +38,26 @@ void kmain(void)
     c26_basic_init();
     c26_console_flush();
 
+    /* SMP: release the secondary harts, let them announce themselves, and
+       report how many cores came online. Hart 0 owns the desktop from here. */
+    c26_hart_mark_online();
+    c26_secondary_go = 1;
+    __asm__ volatile("fence rw, rw");
+    uint64_t start = c26_interrupt_ticks();
+    while (c26_interrupt_ticks() - start < 3) { /* ~30ms for secondaries */ }
+    c26_puts("SMP: ");
+    c26_put_uint((uint64_t)c26_hart_count());
+    c26_puts(" harts online\n");
+
     for (;;) {
+        /* Hart 0's interactive work (console, compositor, BASIC, devices) runs
+           under the big kernel lock; app scheduling drops it around U-mode.
+           Hart 0 also reaps processes that exited on a secondary hart, so all
+           focus/console/interpreter side effects of teardown stay on hart 0. */
+        c26_kernel_lock();
+        c26_cart_reap_exited();
         c26_desktop_poll();
+        c26_kernel_unlock();
         if (c26_cart_any_runnable()) {
             c26_cart_schedule();
         } else {

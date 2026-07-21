@@ -32,7 +32,7 @@ CART_NAMES := paint crash spin ticker ping pong files edit tracker breakout net 
 CART_LIB := $(wildcard apps/lib/*.c)
 CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
-QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M
+QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M -smp 2
 QEMU_BOOT := -bios none -no-reboot -kernel $(ELF)
 
 # The desktop renders at a native 1920x1080. zoom-to-fit lets the host window

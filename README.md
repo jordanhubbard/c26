@@ -13,6 +13,14 @@ host operating system.
 
 - M-mode trap handling, a 10 MHz CLINT timer, PLIC-routed UART/virtio
   interrupts, and an idle loop that sleeps with `WFI`.
+- SMP: the machine runs on multiple RISC-V harts (default 2, `-smp N`). Hart 0
+  owns the interactive machine — devices, the compositor, the console, and the
+  BASIC/Scheme REPL — while secondary harts run U-mode application processes in
+  parallel, so an app computes on one core while the desktop stays live on
+  another. A single recursive big kernel lock serialises shared state (held only
+  in the kernel, dropped around U-mode); secondaries take only their own timer
+  and defer process teardown to hart 0. The smoke gate boots with two harts and
+  asserts an app actually executed on the second core.
 - Modern virtio-MMIO transport shared by block, GPU, input, and sound drivers.
 - A persistent 8 MiB raw virtio-block disk with C26FS v2: 64 checksummed
   files up to 128 KiB, a free-sector allocation bitmap, and DELETE/RENAME.

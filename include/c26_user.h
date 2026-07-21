@@ -51,6 +51,15 @@
 #define C26_SYS_TEXT_FG 41
 #define C26_SYS_COUNT 42
 
+/* Symmetric multiprocessing: the machine runs on up to C26_NHART harts. Hart 0
+ * owns the interactive machine (devices, compositor, REPL); secondary harts run
+ * U-mode app processes in parallel. Per-hart kernel trap state is indexed by
+ * mhartid, so trap.S scales the index by these strides. */
+#define C26_NHART 4
+#define C26_KCTX_WORDS 14
+#define C26_KCTX_STRIDE 112   /* C26_KCTX_WORDS * 8, for trap.S indexing */
+#define C26_HART_STACK 16384  /* per secondary-hart kernel stack, boot.S */
+
 /* Trap frame layout: mepc at 0, x1..x31 at 8*N, kernel trap sp at 256,
  * kernel callee-saved context (ra, sp, s0-s11) at 264. trap.S depends on
  * these offsets. */
@@ -72,12 +81,13 @@ typedef struct {
 /* Register accessor: xN for N in 1..31. */
 #define C26_FRAME_X(frame, n) ((frame)->regs[(n)-1])
 
-/* trap.S resumes the frame this points at; the scheduler retargets it on
- * every process switch. The kernel's own context lives in the globals, not
- * in any frame, so any process's exit unwinds to the scheduler. */
-extern c26_user_frame_t *c26_current_frame;
-extern uint64_t c26_kernel_trap_sp;
-extern uint64_t c26_kernel_context[14];
+/* Per-hart kernel trap state, indexed by mhartid. trap.S resumes the frame
+ * c26_current_frame[hart] points at; the scheduler retargets it on every
+ * process switch. Each hart has its own trap stack and callee-saved context,
+ * so a process's exit unwinds to that hart's scheduler. */
+extern c26_user_frame_t *c26_current_frame[C26_NHART];
+extern uint64_t c26_kernel_trap_sp[C26_NHART];
+extern uint64_t c26_kernel_context[C26_NHART][C26_KCTX_WORDS];
 
 /* Enters U-mode per the current frame; returns only via
  * c26_user_terminate with that call's code. */

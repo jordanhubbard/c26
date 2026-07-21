@@ -21,9 +21,19 @@
 
 extern void c26_trap_entry(void);
 
-static volatile uint64_t timer_ticks;
+/* Per-hart timer state: each hart has its own CLINT mtimecmp compare register
+   at CLINT_MTIMECMP + 8*hartid and its own tick counter. */
+#define CLINT_MTIMECMP_HART(h) (CLINT_BASE + 0x4000UL + 8UL * (uint64_t)(h))
+static volatile uint64_t timer_ticks[C26_NHART];
 static volatile uint64_t external_interrupts;
-static uint64_t next_timer;
+static uint64_t next_timer[C26_NHART];
+
+static inline int hartid(void)
+{
+    uint64_t id;
+    __asm__ volatile("csrr %0, mhartid" : "=r"(id));
+    return (int)id;
+}
 
 static uint64_t read_mcause(void)
 {
@@ -34,12 +44,13 @@ static uint64_t read_mcause(void)
 
 void c26_timer_interrupt(void)
 {
-    timer_ticks++;
+    int h = hartid();
+    timer_ticks[h]++;
     uint64_t now = *(volatile uint64_t *)CLINT_MTIME;
     do {
-        next_timer += TIMER_INTERVAL;
-    } while (next_timer <= now);
-    *(volatile uint64_t *)CLINT_MTIMECMP = next_timer;
+        next_timer[h] += TIMER_INTERVAL;
+    } while (next_timer[h] <= now);
+    *(volatile uint64_t *)CLINT_MTIMECMP_HART(h) = next_timer[h];
 }
 
 void c26_external_interrupt(void)
@@ -81,9 +92,13 @@ void c26_trap_handler(void)
     }
     cause &= ~MCAUSE_INTERRUPT;
     if (cause == MCAUSE_MACHINE_TIMER) {
+        /* Per-hart timer state only — no shared state, so no lock needed. */
         c26_timer_interrupt();
     } else if (cause == MCAUSE_MACHINE_EXTERNAL) {
+        /* Device state is shared with app syscalls on other harts. */
+        c26_kernel_lock();
         c26_external_interrupt();
+        c26_kernel_unlock();
     }
 }
 
@@ -104,8 +119,8 @@ void c26_interrupts_init(void)
     *(volatile uint32_t *)PLIC_THRESHOLD = 0;
 
     c26_uart_enable_interrupt();
-    next_timer = *(volatile uint64_t *)CLINT_MTIME + TIMER_INTERVAL;
-    *(volatile uint64_t *)CLINT_MTIMECMP = next_timer;
+    next_timer[0] = *(volatile uint64_t *)CLINT_MTIME + TIMER_INTERVAL;
+    *(volatile uint64_t *)CLINT_MTIMECMP_HART(0) = next_timer[0];
 
     uintptr_t mie = MIE_MTIE | MIE_MEIE;
     __asm__ volatile("csrw mie, %0" :: "r"(mie));
@@ -113,9 +128,32 @@ void c26_interrupts_init(void)
     c26_puts("INTERRUPTS: CLINT timer + PLIC online, idle uses WFI\n");
 }
 
+/* Per-hart bring-up for a secondary hart: its own trap vector, PMP, and CLINT
+   timer. Secondaries take only their timer (for preemption); device (external)
+   interrupts stay routed to hart 0. */
+void c26_hart_init(void)
+{
+    int h = hartid();
+    __asm__ volatile("csrw mtvec, %0" :: "r"(c26_trap_entry));
+    __asm__ volatile("csrw mscratch, zero");
+    __asm__ volatile("csrw pmpaddr0, %0" :: "r"(~0UL >> 10));
+    __asm__ volatile("csrw pmpcfg0, %0" :: "r"(0x1fUL));
+    next_timer[h] = *(volatile uint64_t *)CLINT_MTIME + TIMER_INTERVAL;
+    *(volatile uint64_t *)CLINT_MTIMECMP_HART(h) = next_timer[h];
+    __asm__ volatile("csrw mie, %0" :: "r"((uintptr_t)MIE_MTIE));
+    __asm__ volatile("csrs mstatus, %0" :: "r"((uintptr_t)MSTATUS_MIE));
+}
+
 uint64_t c26_interrupt_ticks(void)
 {
-    return timer_ticks;
+    /* Hart 0's tick is the machine's monotonic 100 Hz clock (animations, RTC-
+       independent timing all run on hart 0), independent of how many harts run. */
+    return timer_ticks[0];
+}
+
+uint64_t c26_hart_ticks(int h)
+{
+    return (h >= 0 && h < C26_NHART) ? timer_ticks[h] : 0;
 }
 
 uint64_t c26_interrupt_external_count(void)
