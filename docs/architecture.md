@@ -32,7 +32,7 @@ The current real emulated backends are:
 
 ## Graphics stack
 
-The framebuffer is always backed by a 640x480 32-bit software pixel array. If a
+The framebuffer is always backed by a 1920x1080 32-bit software pixel array. If a
 virtio GPU is present, that memory is attached to a scanout resource. Without a
 GPU the same drawing APIs remain safe but have no physical scanout.
 

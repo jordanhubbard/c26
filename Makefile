@@ -34,6 +34,16 @@ CARTS := $(CART_NAMES:%=$(BUILD)/%.cart)
 
 QEMU_MACHINE := -M virt -global virtio-mmio.force-legacy=false -cpu rv64 -m 256M
 QEMU_BOOT := -bios none -no-reboot -kernel $(ELF)
+
+# The desktop renders at a native 1920x1080. zoom-to-fit lets the host window
+# be resized freely (drag any corner) and scales the guest scanout to fill it,
+# so the machine drives a large display and the window is not locked to 1:1.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+QEMU_DISPLAY ?= cocoa,zoom-to-fit=on
+else
+QEMU_DISPLAY ?= gtk,zoom-to-fit=on
+endif
 QEMU_DEVICES := -device virtio-gpu-device -device virtio-keyboard-device \
 	-device virtio-mouse-device -device virtio-sound-device \
 	-drive if=none,format=raw,file=$(DISK),id=c26disk \
@@ -117,7 +127,7 @@ $(DISK): scripts/mkdisk.py scripts/fsinstall.py $(CARTS) | $(BUILD)
 	python3 scripts/fsinstall.py $@ $(foreach c,$(CART_NAMES),$(shell echo $(c) | tr a-z A-Z)=$(BUILD)/$(c).cart)
 
 run: $(ELF) $(DISK)
-	$(QEMU) $(QEMU_MACHINE) -display default -serial stdio -monitor none \
+	$(QEMU) $(QEMU_MACHINE) -display $(QEMU_DISPLAY) -serial stdio -monitor none \
 		$(QEMU_BOOT) $(QEMU_DEVICES)
 
 run-headless: $(ELF) $(DISK)

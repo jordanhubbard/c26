@@ -37,7 +37,7 @@ replacing magic memory addresses with typed SDK calls.
 | Self-hosting | On-board two-pass RV64 assembler builds runnable cartridges |
 | Scripting | BASIC WINDOW/FOCUS/SEND drive the window manager and IPC |
 | Clock | Goldfish RTC wall-clock time; BASIC TIME and TIME$ |
-| Display | 640x480x32 software surface on a virtio-GPU scanout |
+| Display | 1920x1080x32 software surface on a virtio-GPU scanout |
 | Console | 100x45 scrolling text console, printable-ASCII 5x7 font |
 | 2D/3D | Pixel primitives, text, depth-tested colored triangles |
 | Ray tracing | Integer CPU ray/sphere renderer |
