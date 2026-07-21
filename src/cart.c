@@ -327,6 +327,278 @@ static const uint32_t dock_palette[8] = {
     0x9b6cff, 0xff8a3d, 0x2fd0d8, 0xf05a7a,
 };
 
+/* ------------------------------------------------------------------ */
+/* Pictorial app icons: small procedural pictograms, keyed by app name, so
+   the dock reads like a shelf of real apps instead of lettered boxes. They
+   are drawn in a normalized 0..100 box so they scale with dock magnification.
+   No image assets — the machine has no PNG decoder, hand-drawn vector-ish
+   pixel art keeps the whole desktop in one readable file and in the gate. */
+#define IW 0xffffffU     /* icon white       */
+#define IK 0x1b2140U     /* icon dark accent */
+
+static void ic_fill(int b, int y, int s, int x0, int y0, int w, int h, uint32_t c)
+{
+    int px = b + x0 * s / 100, py = y + y0 * s / 100;
+    int pw = w * s / 100, ph = h * s / 100;
+    if (pw < 1) pw = 1;
+    if (ph < 1) ph = 1;
+    c26_fill_rect(px, py, pw, ph, c);
+}
+static void ic_disc(int b, int y, int s, int cx, int cy, int r, uint32_t c)
+{
+    int px = b + cx * s / 100, py = y + cy * s / 100, pr = r * s / 100;
+    if (pr < 1) pr = 1;
+    for (int dy = -pr; dy <= pr; dy++) {
+        int w = 0;
+        while (w * w + dy * dy <= pr * pr) w++;
+        if (w > 0) c26_fill_rect(px - w + 1, py + dy, 2 * w - 1, 1, c);
+    }
+}
+static void ic_line(int b, int y, int s, int x0, int y0, int x1, int y1, uint32_t c)
+{
+    c26_draw_line(b + x0 * s / 100, y + y0 * s / 100, b + x1 * s / 100,
+                  y + y1 * s / 100, c);
+}
+static void ic_tri(int b, int y, int s, int x0, int y0, int x1, int y1, int x2,
+                   int y2, uint32_t c)
+{
+    int ax = b + x0 * s / 100, ay = y + y0 * s / 100;
+    int bx = b + x1 * s / 100, by = y + y1 * s / 100;
+    int cx = b + x2 * s / 100, cy = y + y2 * s / 100;
+    int minx = ax < bx ? (ax < cx ? ax : cx) : (bx < cx ? bx : cx);
+    int maxx = ax > bx ? (ax > cx ? ax : cx) : (bx > cx ? bx : cx);
+    int miny = ay < by ? (ay < cy ? ay : cy) : (by < cy ? by : cy);
+    int maxy = ay > by ? (ay > cy ? ay : cy) : (by > cy ? by : cy);
+    for (int py = miny; py <= maxy; py++) {
+        for (int px = minx; px <= maxx; px++) {
+            int d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+            int d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+            int d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+            int neg = d1 < 0 || d2 < 0 || d3 < 0;
+            int pos = d1 > 0 || d2 > 0 || d3 > 0;
+            if (!(neg && pos)) c26_fill_rect(px, py, 1, 1, c);
+        }
+    }
+}
+
+static void icon_paint(int b, int y, int s)
+{
+    ic_disc(b, y, s, 50, 52, 33, IW);
+    ic_disc(b, y, s, 62, 68, 8, IK);
+    ic_disc(b, y, s, 33, 46, 6, 0xff5f57);
+    ic_disc(b, y, s, 50, 30, 6, 0x28c840);
+    ic_disc(b, y, s, 68, 40, 6, 0x3d80ff);
+    ic_disc(b, y, s, 38, 66, 6, 0xffd34d);
+}
+static void icon_calc(int b, int y, int s)
+{
+    ic_fill(b, y, s, 26, 14, 48, 72, IW);
+    ic_fill(b, y, s, 32, 20, 36, 13, 0x123a24);
+    ic_fill(b, y, s, 35, 23, 18, 4, 0x59e0a0);
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+            ic_fill(b, y, s, 33 + c * 13, 40 + r * 14, 9, 9, IK);
+}
+static void icon_clock(int b, int y, int s)
+{
+    ic_disc(b, y, s, 50, 50, 34, IW);
+    ic_disc(b, y, s, 50, 50, 29, 0xe9eeff);
+    ic_fill(b, y, s, 48, 22, 4, 7, IK);
+    ic_fill(b, y, s, 48, 71, 4, 7, IK);
+    ic_fill(b, y, s, 21, 48, 7, 4, IK);
+    ic_fill(b, y, s, 72, 48, 7, 4, IK);
+    ic_line(b, y, s, 50, 50, 50, 30, IK);
+    ic_line(b, y, s, 50, 50, 64, 56, IK);
+    ic_disc(b, y, s, 50, 50, 4, 0xff5f57);
+}
+static void icon_snake(int b, int y, int s)
+{
+    ic_disc(b, y, s, 30, 70, 9, IW);
+    ic_disc(b, y, s, 44, 62, 9, IW);
+    ic_disc(b, y, s, 56, 50, 9, IW);
+    ic_disc(b, y, s, 50, 34, 9, IW);
+    ic_disc(b, y, s, 66, 28, 11, IW);
+    ic_disc(b, y, s, 70, 24, 3, IK);
+    ic_fill(b, y, s, 76, 27, 11, 3, 0xff5f57);
+}
+static void icon_files(int b, int y, int s)
+{
+    ic_fill(b, y, s, 20, 32, 28, 9, IW);
+    ic_fill(b, y, s, 18, 38, 64, 42, IW);
+    ic_fill(b, y, s, 18, 44, 64, 4, 0xc3ccf5);
+}
+static void icon_edit(int b, int y, int s)
+{
+    ic_fill(b, y, s, 26, 16, 42, 68, IW);
+    for (int i = 0; i < 4; i++) ic_fill(b, y, s, 32, 28 + i * 11, 26, 3, 0x3a4488);
+    ic_line(b, y, s, 58, 78, 80, 52, 0xffd34d);
+    ic_line(b, y, s, 59, 79, 81, 53, 0xffd34d);
+    ic_tri(b, y, s, 78, 50, 85, 55, 79, 60, 0xff9f3d);
+}
+static void icon_tracker(int b, int y, int s)
+{
+    static const uint32_t cols[4] = {0x59e0a0, 0xffd34d, 0xff5ca8, 0x3d80ff};
+    static const int hgt[4] = {44, 64, 30, 54};
+    for (int i = 0; i < 4; i++) {
+        int x = 24 + i * 14;
+        ic_fill(b, y, s, x, 84 - hgt[i], 10, hgt[i], IW);
+        ic_fill(b, y, s, x, 84 - hgt[i], 10, 6, cols[i]);
+    }
+}
+static void icon_breakout(int b, int y, int s)
+{
+    static const uint32_t cols[4] = {0xff5f57, 0xffd34d, 0x28c840, 0x3d80ff};
+    for (int r = 0; r < 2; r++)
+        for (int c = 0; c < 4; c++)
+            ic_fill(b, y, s, 18 + c * 17, 20 + r * 11, 14, 8, cols[(r + c) % 4]);
+    ic_disc(b, y, s, 50, 58, 5, IW);
+    ic_fill(b, y, s, 36, 76, 28, 7, IW);
+}
+static void icon_net(int b, int y, int s)
+{
+    ic_line(b, y, s, 28, 32, 50, 66, 0xc3ccf5);
+    ic_line(b, y, s, 72, 32, 50, 66, 0xc3ccf5);
+    ic_line(b, y, s, 28, 32, 72, 32, 0xc3ccf5);
+    ic_disc(b, y, s, 28, 32, 8, 0x59e0a0);
+    ic_disc(b, y, s, 72, 32, 8, 0xffd34d);
+    ic_disc(b, y, s, 50, 66, 9, IW);
+}
+static void icon_asm(int b, int y, int s)
+{
+    ic_fill(b, y, s, 30, 30, 40, 40, IW);
+    ic_fill(b, y, s, 38, 38, 24, 24, IK);
+    for (int i = 0; i < 3; i++) {
+        int p = 36 + i * 14;
+        ic_fill(b, y, s, p, 20, 6, 10, IW);
+        ic_fill(b, y, s, p, 70, 6, 10, IW);
+        ic_fill(b, y, s, 20, p, 10, 6, IW);
+        ic_fill(b, y, s, 70, p, 10, 6, IW);
+    }
+}
+static void icon_hexedit(int b, int y, int s)
+{
+    ic_fill(b, y, s, 20, 22, 60, 56, IW);
+    for (int c = 1; c < 4; c++) ic_fill(b, y, s, 20 + c * 15, 22, 2, 56, IK);
+    for (int r = 1; r < 4; r++) ic_fill(b, y, s, 20, 22 + r * 14, 60, 2, IK);
+    ic_fill(b, y, s, 21, 23, 14, 13, 0x59e0a0);
+}
+static void icon_sheet(int b, int y, int s)
+{
+    ic_fill(b, y, s, 20, 20, 60, 60, IW);
+    ic_fill(b, y, s, 20, 20, 60, 12, 0x3d80ff);
+    for (int c = 1; c < 3; c++) ic_fill(b, y, s, 20 + c * 20, 20, 2, 60, 0xc3ccf5);
+    for (int r = 1; r < 4; r++) ic_fill(b, y, s, 20, 20 + r * 15, 60, 2, 0xc3ccf5);
+}
+static void icon_robot(int b, int y, int s)
+{
+    ic_line(b, y, s, 50, 14, 50, 26, 0xc3ccf5);
+    ic_disc(b, y, s, 50, 12, 4, 0xff5f57);
+    ic_fill(b, y, s, 26, 26, 48, 44, IW);
+    ic_fill(b, y, s, 34, 38, 10, 10, IK);
+    ic_fill(b, y, s, 56, 38, 10, 10, IK);
+    ic_fill(b, y, s, 36, 58, 28, 5, IK);
+    ic_fill(b, y, s, 20, 40, 6, 16, IW);
+    ic_fill(b, y, s, 74, 40, 6, 16, IW);
+}
+static void icon_monitor(int b, int y, int s)
+{
+    ic_fill(b, y, s, 18, 22, 64, 44, IW);
+    ic_fill(b, y, s, 23, 27, 54, 34, 0x111a30);
+    ic_fill(b, y, s, 27, 32, 20, 3, 0x59e0a0);
+    ic_fill(b, y, s, 27, 39, 30, 3, 0xffd34d);
+    ic_fill(b, y, s, 27, 46, 16, 3, 0x3d80ff);
+    ic_fill(b, y, s, 44, 66, 12, 8, IW);
+    ic_fill(b, y, s, 34, 76, 32, 5, IW);
+}
+static void icon_tinyc(int b, int y, int s)
+{
+    ic_disc(b, y, s, 50, 50, 26, IW);
+    ic_fill(b, y, s, 46, 16, 8, 12, IW);
+    ic_fill(b, y, s, 46, 72, 8, 12, IW);
+    ic_fill(b, y, s, 16, 46, 12, 8, IW);
+    ic_fill(b, y, s, 72, 46, 12, 8, IW);
+    ic_fill(b, y, s, 26, 26, 11, 11, IW);
+    ic_fill(b, y, s, 63, 26, 11, 11, IW);
+    ic_fill(b, y, s, 26, 63, 11, 11, IW);
+    ic_fill(b, y, s, 63, 63, 11, 11, IW);
+    ic_disc(b, y, s, 50, 50, 10, IK);
+}
+static void icon_fetch(int b, int y, int s)
+{
+    ic_disc(b, y, s, 50, 50, 32, IW);
+    ic_disc(b, y, s, 50, 50, 28, 0x3d80ff);
+    ic_fill(b, y, s, 22, 48, 56, 4, IW);
+    ic_line(b, y, s, 50, 20, 50, 80, IW);
+    ic_line(b, y, s, 50, 20, 36, 50, IW);
+    ic_line(b, y, s, 36, 50, 50, 80, IW);
+    ic_line(b, y, s, 50, 20, 64, 50, IW);
+    ic_line(b, y, s, 64, 50, 50, 80, IW);
+}
+static void icon_ping(int b, int y, int s)
+{
+    ic_fill(b, y, s, 20, 44, 34, 12, IW);
+    ic_tri(b, y, s, 50, 32, 80, 50, 50, 68, IW);
+}
+static void icon_pong(int b, int y, int s)
+{
+    ic_fill(b, y, s, 46, 44, 34, 12, IW);
+    ic_tri(b, y, s, 50, 32, 20, 50, 50, 68, IW);
+}
+static void icon_ticker(int b, int y, int s)
+{
+    ic_line(b, y, s, 16, 50, 36, 50, IW);
+    ic_line(b, y, s, 36, 50, 44, 28, IW);
+    ic_line(b, y, s, 44, 28, 54, 72, IW);
+    ic_line(b, y, s, 54, 72, 62, 50, IW);
+    ic_line(b, y, s, 62, 50, 84, 50, IW);
+}
+static void icon_spin(int b, int y, int s)
+{
+    static const int px[7] = {50, 68, 76, 68, 50, 32, 24};
+    static const int py[7] = {24, 32, 50, 68, 76, 68, 50};
+    for (int i = 0; i < 7; i++) ic_disc(b, y, s, px[i], py[i], 5, IW);
+    ic_tri(b, y, s, 22, 34, 40, 28, 34, 48, IW);
+}
+static void icon_crash(int b, int y, int s)
+{
+    ic_tri(b, y, s, 50, 18, 84, 78, 16, 78, 0xffd34d);
+    ic_fill(b, y, s, 47, 42, 6, 20, IK);
+    ic_fill(b, y, s, 47, 66, 6, 6, IK);
+}
+
+static int icon_name_eq(const char *a, const char *b)
+{
+    while (*a != '\0' && *b != '\0') {
+        if (*a != *b) return 0;
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+static const struct {
+    const char *name;
+    void (*fn)(int, int, int);
+} icon_table[] = {
+    {"PAINT", icon_paint},     {"CALC", icon_calc},   {"CLOCK", icon_clock},
+    {"SNAKE", icon_snake},     {"FILES", icon_files}, {"EDIT", icon_edit},
+    {"TRACKER", icon_tracker}, {"BREAKOUT", icon_breakout}, {"NET", icon_net},
+    {"ASM", icon_asm},         {"HEXEDIT", icon_hexedit},   {"SHEET", icon_sheet},
+    {"ROBOT", icon_robot},     {"MONITOR", icon_monitor},   {"TINYC", icon_tinyc},
+    {"FETCH", icon_fetch},     {"PING", icon_ping},   {"PONG", icon_pong},
+    {"TICKER", icon_ticker},   {"SPIN", icon_spin},   {"CRASH", icon_crash},
+};
+/* Draw the pictogram for an app, or return 0 if it has no bespoke icon. */
+static int dock_icon(const char *name, int bx, int by, int s)
+{
+    for (unsigned i = 0; i < sizeof(icon_table) / sizeof(icon_table[0]); i++) {
+        if (icon_name_eq(name, icon_table[i].name)) {
+            icon_table[i].fn(bx, by, s);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void dock_draw(void)
 {
     if (dock_count == 0) return;
@@ -371,13 +643,14 @@ static void dock_draw(void)
         fill_round_rect(ix + 1, iy + 2, size, size, irad, 0x05070f); /* shadow */
         fill_round_grad(ix, iy, size, size, irad, top, bot);
         gloss_cap(ix, iy, size, size, irad, mix(c, 0xffffffU, 30));
-        /* the bright initial, embossed, scaled with the icon */
-        char initial[2] = {tile->name[0], '\0'};
-        int gs = size >= 44 ? 3 : 2;
-        draw_char_fg(cx - (5 * gs) / 2 + 1, iy + size / 2 - (7 * gs) / 2 + 1,
-                     initial[0], darken(c, 90), gs);
-        draw_char_fg(cx - (5 * gs) / 2, iy + size / 2 - (7 * gs) / 2, initial[0],
-                     0xffffffU, gs);
+        /* a pictorial app icon, or the initial as a fallback for unknown apps */
+        if (!dock_icon(tile->name, ix, iy, size)) {
+            int gs = size >= 44 ? 3 : 2;
+            draw_char_fg(cx - (5 * gs) / 2 + 1, iy + size / 2 - (7 * gs) / 2 + 1,
+                         tile->name[0], darken(c, 90), gs);
+            draw_char_fg(cx - (5 * gs) / 2, iy + size / 2 - (7 * gs) / 2,
+                         tile->name[0], 0xffffffU, gs);
+        }
     }
     /* One tooltip-style label for the icon directly under the pointer. */
     if (label_i >= 0) {
