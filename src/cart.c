@@ -747,6 +747,27 @@ static void surface_text(uint32_t *surface, int x, int y, const char *text,
     }
 }
 
+/* Transparent variant: paint only the lit glyph pixels, no background box, so
+   app labels sit on gradients/gloss. Backs the ABI v6 text_fg syscall. */
+static void surface_text_fg(uint32_t *surface, int x, int y, const char *text,
+                            uint32_t fg, unsigned int scale)
+{
+    if (scale == 0) scale = 1;
+    while (*text != '\0') {
+        const uint8_t *glyph = c26_font_glyph(*text++);
+        for (unsigned int column = 0; column < 5; column++) {
+            for (unsigned int row = 0; row < 7; row++) {
+                if ((glyph[column] & (1U << row)) != 0) {
+                    surface_fill(surface, x + (int)(column * scale),
+                                 y + (int)(row * scale), (int)scale,
+                                 (int)scale, fg);
+                }
+            }
+        }
+        x += (int)(6 * scale);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Z-order, focus, and the compositor                                  */
 
@@ -1592,6 +1613,13 @@ static long do_syscall(c26_user_frame_t *frame)
         if (text == 0) break;
         surface_text(proc_surface[current], (int)a0, (int)a1, text,
                      (uint32_t)a3, (uint32_t)a4, (unsigned int)a5);
+        return 0;
+    }
+    case C26_SYS_TEXT_FG: {
+        const char *text = user_string(a2);
+        if (text == 0) break;
+        surface_text_fg(proc_surface[current], (int)a0, (int)a1, text,
+                        (uint32_t)a3, (unsigned int)a4);
         return 0;
     }
     case C26_SYS_PRESENT:

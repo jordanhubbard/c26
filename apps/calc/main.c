@@ -70,20 +70,50 @@ static void key_rect(int row, int col, int *x, int *y, int *w, int *h)
     *h = ch - 2;
 }
 
+/* Which key the pointer is currently pushing in (row/col), or -1. */
+static int held_r = -1;
+static int held_c = -1;
+
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, 24, 0x222957);
-    api->text(6, 4, "CALC", 0xffffff, 0x222957, 2);
+    vgrad(api, 0, 0, (int)width, (int)height, 0x141a36, 0x0a0e20);
+    /* title bar */
+    vgrad(api, 0, 0, (int)width, 24, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x4a56b4);
+    label_fg(api, 6, 4, "CALC", 0xffffff, 0x30397e, 2);
 
-    /* Display bar shows the entry, or the accumulator, or ERROR. */
-    api->fill_rect(4, 26, (int)width - 8, 26, 0x1a2140);
+    /* recessed display bar shows the entry, or the accumulator, or ERROR */
+    vgrad(api, 4, 26, (int)width - 8, 26, 0x0c1226, 0x060a18);
+    api->fill_rect(4, 26, (int)width - 8, 1, 0x04060e);
     char buf[24];
     if (error) {
-        api->text(10, 32, "ERROR", 0xffd34d, 0x1a2140, 2);
+        label_fg(api, 10, 32, "ERROR", 0xffd34d, 0x0c1226, 2);
     } else {
         format_int(entering ? cur : acc, buf);
-        api->text(10, 32, buf, 0x68f0c0, 0x1a2140, 2);
+        label_fg(api, 10, 32, buf, 0x68f0c0, 0x0c1226, 2);
     }
 
     for (int r = 0; r < ROWS; r++) {
@@ -91,12 +121,20 @@ static void draw(const c26_api_t *api)
             int x, y, w, h;
             key_rect(r, c, &x, &y, &w, &h);
             char k = keys[r][c];
-            uint32_t bg = (k >= '0' && k <= '9') ? 0x35409a : 0x5a3a7a;
-            if (k == '=') bg = 0x2f7a4a;
-            if (k == 'C') bg = 0x8a3030;
-            api->fill_rect(x, y, w, h, bg);
+            uint32_t base = (k >= '0' && k <= '9') ? 0x3a46a8 : 0x6a4694;
+            if (k == '=') base = 0x2f9a54;
+            if (k == 'C') base = 0xb0384a;
+            int held = r == held_r && c == held_c;
+            /* glossy bevel: bright top -> dark bottom, inverted when pressed */
+            uint32_t top = held ? cmix(base, 0x000000, 55) : cmix(base, 0xffffff, 60);
+            uint32_t bot = held ? cmix(base, 0x000000, 120) : cmix(base, 0x000000, 55);
+            vgrad(api, x, y, w, h, top, bot);
+            if (!held) api->fill_rect(x, y, w, 2, cmix(base, 0xffffff, 130));
+            api->fill_rect(x, y + h - 1, w, 1, cmix(base, 0x000000, 150));
             char label[2] = {k, '\0'};
-            api->text(x + w / 2 - 5, y + h / 2 - 7, label, 0xffffff, bg, 2);
+            int off = held ? 1 : 0;
+            label_fg(api, x + w / 2 - 5 + off, y + h / 2 - 7 + off, label,
+                     0xffffff, base, 2);
         }
     }
 }
@@ -165,11 +203,18 @@ int app_main(const c26_api_t *api)
                     int kx, ky, kw, kh;
                     key_rect(r, c, &kx, &ky, &kw, &kh);
                     if (x >= kx && x < kx + kw && y >= ky && y < ky + kh) {
+                        held_r = r; /* show the key pushed in while held */
+                        held_c = c;
                         press(api, keys[r][c]);
                         dirty = 1;
                     }
                 }
             }
+        }
+        if ((buttons & 1) == 0 && held_r >= 0) { /* release: pop the key back */
+            held_r = -1;
+            held_c = -1;
+            dirty = 1;
         }
         last_buttons = buttons & 1;
 

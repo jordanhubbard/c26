@@ -187,7 +187,7 @@ implementation over virtio-net — ARP, ICMP echo reply, UDP, a
 single-connection TCP client, and a DNS A-record resolver — on QEMU's user
 network (guest 10.0.2.15, gateway 10.0.2.2). A kernel UDP echo service on
 port 2600 is reachable from the host through `hostfwd`, and cartridges get
-`udp_bind`/`udp_send`/`udp_recv` plus (ABI v5) `tcp_connect`/`send`/`recv`/
+`udp_bind`/`udp_send`/`udp_recv` plus (ABI v5+) `tcp_connect`/`send`/`recv`/
 `close`/`state` and `dns_resolve` syscalls — the `FETCH` app does a real HTTP
 get over them. BASIC `TCP`/`RESOLVE` drive the same client and resolver; the
 smoke gate handshakes with a scripted host peer through QEMU `guestfwd` (which

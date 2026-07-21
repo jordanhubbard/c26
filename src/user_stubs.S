@@ -64,12 +64,13 @@ STUB(stub_tcp_recv, C26_SYS_TCP_RECV)
 STUB(stub_tcp_close, C26_SYS_TCP_CLOSE)
 STUB(stub_tcp_state, C26_SYS_TCP_STATE)
 STUB(stub_dns_resolve, C26_SYS_DNS_RESOLVE)
+STUB(stub_text_fg, C26_SYS_TEXT_FG)
 
     /* c26_api_t, field for field. */
     .align 3
     .globl c26_user_api
 c26_user_api:
-    .word 5                    /* version */
+    .word 6                    /* version */
     .word 0                    /* padding */
     .quad stub_puts
     .quad stub_putc
@@ -111,3 +112,4 @@ c26_user_api:
     .quad stub_tcp_close
     .quad stub_tcp_state
     .quad stub_dns_resolve
+    .quad stub_text_fg

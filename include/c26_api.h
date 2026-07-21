@@ -126,6 +126,13 @@ typedef struct {
     void (*tcp_close)(void);
     int (*tcp_state)(void);
     int (*dns_resolve)(const char *name, uint32_t *out_ip);
+
+    /* --- version 6: transparent text --- */
+
+    /* Draw text painting only the lit glyph pixels (no background box), so
+       labels sit cleanly on gradients and gloss. Same geometry as text(). */
+    void (*text_fg)(int x, int y, const char *message, uint32_t fg,
+                    unsigned int scale);
 } c26_api_t;
 
 /* Arrow keys are delivered through getchar() as these codes. */
