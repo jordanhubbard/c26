@@ -42,6 +42,29 @@ static void blip(const c26_api_t *api, uint32_t hz)
     blip_until = api->ticks() + 4;
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
     ui_clear(&ui);
@@ -56,18 +79,33 @@ static void draw(const c26_api_t *api)
     } while (value != 0);
     while (count != 0) title[used++] = digits[--count];
     title[used] = '\0';
-    ui_titlebar(&ui, title, "R RESTART  Q QUIT");
+    /* glossy title/score bar */
+    int tw = (int)ui.width;
+    vgrad(api, 0, 0, tw, 30, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, tw, 1, 0x4a56b4);  /* top highlight */
+    api->fill_rect(0, 29, tw, 1, 0x0a0e20); /* seam shadow */
+    label_fg(api, 8, 5, title, UI_BRIGHT, UI_PANEL, 3);
+    const char *hint = "R RESTART  Q QUIT";
+    int hint_len = 0;
+    while (hint[hint_len] != '\0') hint_len++;
+    label_fg(api, tw - 12 * hint_len - 8, 9, hint, UI_TEXT, UI_PANEL, 2);
     int bw = ((int)ui.width - 16) / BRICK_COLS;
     for (int r = 0; r < BRICK_ROWS; r++) {
         for (int c = 0; c < BRICK_COLS; c++) {
             if (!bricks[r][c]) continue;
             static const uint32_t colors[4] = {0xb86962, 0xffad45, 0xbfce72,
                                                0x68f0c0};
-            api->fill_rect(8 + c * bw, field_top() + 8 + r * 26, bw - 5, 20,
-                           colors[r]);
+            int bx = 8 + c * bw, by = field_top() + 8 + r * 26;
+            api->fill_rect(bx, by, bw - 5, 20, colors[r]);
+            /* subtle bevel: bright top edge, dark bottom edge; colour kept */
+            api->fill_rect(bx, by, bw - 5, 1, cmix(colors[r], 0xffffff, 90));
+            api->fill_rect(bx, by + 19, bw - 5, 1, cmix(colors[r], 0x000000, 90));
         }
     }
-    api->fill_rect(paddle_x, field_top() + field_h() - 12, 100, 10, UI_BRIGHT);
+    int px = paddle_x, py = field_top() + field_h() - 12;
+    api->fill_rect(px, py, 100, 10, UI_BRIGHT);
+    api->fill_rect(px, py, 100, 1, cmix(UI_BRIGHT, 0xffffff, 90));   /* top */
+    api->fill_rect(px, py + 9, 100, 1, cmix(UI_BRIGHT, 0x000000, 90)); /* base */
     api->fill_rect(ball_x - 5, ball_y - 5, 10, 10, UI_WARN);
     char status[24] = "LIVES ";
     status[6] = (char)('0' + lives);

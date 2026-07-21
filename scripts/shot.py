@@ -69,10 +69,12 @@ def main():
             except OSError:
                 time.sleep(0.1)
         time.sleep(6.0)  # let the desktop come up
+        delay = float(os.environ.get("SHOT_DELAY", "1.5"))
+        settle = float(os.environ.get("SHOT_SETTLE", "0.5"))
         for ln in lines:
             s_ser.sendall((ln + "\n").encode())
-            time.sleep(1.5)
-        time.sleep(0.5)
+            time.sleep(delay)
+        time.sleep(settle)
         hmp(s_mon, f"screendump {ppm}")
         time.sleep(1.0)
         subprocess.run(["sips", "-s", "format", "png", ppm, "--out", out_png],

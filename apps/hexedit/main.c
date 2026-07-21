@@ -51,11 +51,37 @@ static int visible_rows(void)
     return rows < 1 ? 1 : rows;
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, 24, 0x222957);
-    api->text(6, 4, "HEXEDIT", 0xffffff, 0x222957, 2);
+    vgrad(api, 0, 0, (int)width, (int)height, 0x141a36, 0x0b1025);
+    /* title bar: glossy panel gradient, bright top highlight and dark seam */
+    vgrad(api, 0, 0, (int)width, 24, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x4a56b4);
+    api->fill_rect(0, 24, (int)width, 1, 0x090d1e);
+    label_fg(api, 6, 4, "HEXEDIT", 0xffffff, 0x30397e, 2);
 
     int rows = visible_rows();
     /* Scroll so the cursor's row stays on screen. */
@@ -110,13 +136,19 @@ static void draw(const c26_api_t *api)
 
         api->text(LEFT, y, line, 0x68f0c0, 0x0b1025, 1);
 
-        /* Highlight the selected byte on its row. */
+        /* Highlight the selected byte on its row with a glossy accent cell. */
         if (size > 0 && cursor >= base && cursor < base + BYTES_PER_ROW) {
             int col = cursor - base;
             /* 6 leading chars (offset + two spaces), then 3 chars per byte,
                each character 6 pixels wide at scale 1. */
             int hx = LEFT + (6 + col * 3) * 6;
-            api->fill_rect(hx, y + 9, 12, 2, 0xffd34d);
+            /* accent-blue gradient cell + a 1px bright top highlight line */
+            vgrad(api, hx - 1, y - 1, 14, 13, 0x4653b4, 0x2f3894);
+            api->fill_rect(hx - 1, y - 1, 14, 1, cmix(0x4653b4, 0xffffff, 90));
+            char cell[3];
+            byte_to_hex(data[cursor], cell);
+            cell[2] = '\0';
+            label_fg(api, hx, y, cell, 0xffffff, 0x4653b4, 1);
         }
     }
 }

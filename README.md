@@ -50,7 +50,13 @@ host operating system.
   amber minimize, green zoom (maximize to fill the desktop) — on the left of its
   title bar; drag the title bar to move, the corner grip to resize. Apps query
   their window size (ABI v2) and get window-local mouse coordinates.
-  `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from BASIC.
+  `WINDOW SIZE/MIN/MAX/CLOSE` script the same operations from BASIC. Launching
+  an app **scales its window open** and **bounces its dock icon**; closing a
+  window **shrinks it away** — all timed off the 100 Hz timer. The gloss carries
+  inside the apps too (ABI v6 adds box-free `text_fg`): the shared toolkit and
+  every cartridge — calculator keypad, spreadsheet, tracker, hex editor, clock,
+  robot panel, disassembler, paint — render gradient chrome and beveled
+  controls instead of flat blocks.
 - IPC: bounded message passing between jobs (`send`/`recv` syscalls with
   per-process mailboxes); `apps/ping` and `apps/pong` prove a round trip
   across address spaces in the smoke gate. A shared system clipboard

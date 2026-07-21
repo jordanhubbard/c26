@@ -103,25 +103,62 @@ static void cell_rect(int gc, int gr, int *x, int *y, int *w, int *h)
     *h = chh - 1;
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, TITLE_H, 0x222957);
-    api->text(6, 4, "SHEET", 0xffffff, 0x222957, 2);
+    /* desktop palette */
+    const uint32_t grid = cmix(0xc3ccf5, 0x0b1025, 200); /* dim grid lines */
+
+    vgrad(api, 0, 0, (int)width, (int)height, 0x141a36, 0x0b1025);
+    /* title bar: panel gradient with bright top / dark seam bevel */
+    vgrad(api, 0, 0, (int)width, TITLE_H, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, cmix(0x30397e, 0xffffff, 90));
+    api->fill_rect(0, TITLE_H - 1, (int)width, 1, cmix(0x191f48, 0x000000, 90));
+    label_fg(api, 6, 4, "SHEET", 0xffffff, 0x30397e, 2);
 
     char buf[24];
     int x, y, w, h;
 
+    /* A glossy accent-blue header cell with a bevel (bright top, dark seam). */
+    #define HEADER_CELL()                                                     \
+        do {                                                                  \
+            vgrad(api, x, y, w, h, 0x4653b4, 0x2f3894);                        \
+            api->fill_rect(x, y, w, 1, cmix(0x4653b4, 0xffffff, 90));          \
+            api->fill_rect(x, y + h - 1, w, 1, cmix(0x2f3894, 0x000000, 90));  \
+        } while (0)
+
     /* Header row: corner, column labels A..E, then SUM. */
     for (int gc = 0; gc < COLS + 2; gc++) {
         cell_rect(gc, 0, &x, &y, &w, &h);
-        api->fill_rect(x, y, w, h, 0x2b3466);
+        HEADER_CELL();
         if (gc >= 1 && gc <= COLS) {
             char lbl[2] = {(char)('A' + gc - 1), '\0'};
-            api->text(x + w / 2 - 3, y + h / 2 - 4, lbl, 0xffd34d, 0x2b3466, 1);
+            label_fg(api, x + w / 2 - 3, y + h / 2 - 4, lbl, 0xffd34d, 0x4653b4, 1);
         } else if (gc == COLS + 1) {
-            api->text(x + w / 2 - 9, y + h / 2 - 4, "SUM", 0xffd34d,
-                      0x2b3466, 1);
+            label_fg(api, x + w / 2 - 9, y + h / 2 - 4, "SUM", 0xffd34d,
+                     0x4653b4, 1);
         }
     }
 
@@ -129,45 +166,56 @@ static void draw(const c26_api_t *api)
     for (int r = 0; r < ROWS; r++) {
         int gr = r + 1;
         cell_rect(0, gr, &x, &y, &w, &h);
-        api->fill_rect(x, y, w, h, 0x2b3466);
+        HEADER_CELL();
         format_int(r + 1, buf);
-        api->text(x + w / 2 - 3, y + h / 2 - 4, buf, 0xffd34d, 0x2b3466, 1);
+        label_fg(api, x + w / 2 - 3, y + h / 2 - 4, buf, 0xffd34d, 0x4653b4, 1);
 
         for (int c = 0; c < COLS; c++) {
             cell_rect(c + 1, gr, &x, &y, &w, &h);
             int selected = (r == cur_r && c == cur_c);
-            uint32_t bg = selected ? 0x35509a : 0x141b3a;
-            api->fill_rect(x, y, w, h, bg);
-            api->draw_rect(x, y, w, h, 0x2b3466);
+            if (selected) {
+                /* selected cell: glossy accent highlight with a top light line */
+                vgrad(api, x, y, w, h, cmix(0x4653b4, 0xffffff, 40), 0x2f3894);
+                api->fill_rect(x, y, w, 1, cmix(0x4653b4, 0xffffff, 130));
+            } else {
+                vgrad(api, x, y, w, h, 0x141a36, 0x0f1430);
+            }
+            api->draw_rect(x, y, w, h, grid);
             if (selected && editing) {
                 format_int(edit_neg ? -edit_val : edit_val, buf);
             } else {
                 format_int(cell[r][c], buf);
             }
-            api->text(x + 3, y + h / 2 - 4, buf, 0xffffff, bg, 1);
+            label_fg(api, x + 3, y + h / 2 - 4, buf, 0xffffff, 0x141a36, 1);
         }
 
         cell_rect(COLS + 1, gr, &x, &y, &w, &h);
-        api->fill_rect(x, y, w, h, 0x1c2a4a);
+        vgrad(api, x, y, w, h, 0x24325a, 0x141f3c);
+        api->fill_rect(x, y, w, 1, cmix(0x24325a, 0xffffff, 60));
         format_int(row_sum(r), buf);
-        api->text(x + 3, y + h / 2 - 4, buf, 0x68f0c0, 0x1c2a4a, 1);
+        label_fg(api, x + 3, y + h / 2 - 4, buf, 0x68f0c0, 0x24325a, 1);
     }
 
     /* SUM row: label, per-column sums, grand total in the corner. */
     int sgr = ROWS + 1;
     cell_rect(0, sgr, &x, &y, &w, &h);
-    api->fill_rect(x, y, w, h, 0x2b3466);
-    api->text(x + w / 2 - 9, y + h / 2 - 4, "SUM", 0xffd34d, 0x2b3466, 1);
+    HEADER_CELL();
+    label_fg(api, x + w / 2 - 9, y + h / 2 - 4, "SUM", 0xffd34d, 0x4653b4, 1);
     for (int c = 0; c < COLS; c++) {
         cell_rect(c + 1, sgr, &x, &y, &w, &h);
-        api->fill_rect(x, y, w, h, 0x1c2a4a);
+        vgrad(api, x, y, w, h, 0x24325a, 0x141f3c);
+        api->fill_rect(x, y, w, 1, cmix(0x24325a, 0xffffff, 60));
         format_int(col_sum(c), buf);
-        api->text(x + 3, y + h / 2 - 4, buf, 0x68f0c0, 0x1c2a4a, 1);
+        label_fg(api, x + 3, y + h / 2 - 4, buf, 0x68f0c0, 0x24325a, 1);
     }
     cell_rect(COLS + 1, sgr, &x, &y, &w, &h);
-    api->fill_rect(x, y, w, h, 0x2f7a4a);
+    vgrad(api, x, y, w, h, 0x2f9a54, 0x1c5a34);
+    api->fill_rect(x, y, w, 1, cmix(0x2f9a54, 0xffffff, 90));
+    api->fill_rect(x, y + h - 1, w, 1, cmix(0x1c5a34, 0x000000, 90));
     format_int(grand_total, buf);
-    api->text(x + 3, y + h / 2 - 4, buf, 0xffffff, 0x2f7a4a, 1);
+    label_fg(api, x + 3, y + h / 2 - 4, buf, 0xffffff, 0x2f9a54, 1);
+
+    #undef HEADER_CELL
 }
 
 int app_main(const c26_api_t *api)

@@ -235,17 +235,47 @@ static uint32_t word_at(int byte_off)
            ((uint32_t)file_buf[byte_off + 3] << 24);
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, 24, 0x222957);
+    vgrad(api, 0, 0, (int)width, (int)height, 0x141a36, 0x0b1025);
+    /* recessed "code screen" behind the listing */
+    vgrad(api, 4, 28, (int)width - 8, (int)height - 32, 0x0c1226, 0x060a18);
+    api->fill_rect(4, 28, (int)width - 8, 1, 0x04060e);
+
+    /* glossy title bar */
+    vgrad(api, 0, 0, (int)width, 24, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x4a56b4);       /* bright top highlight */
+    api->fill_rect(0, 23, (int)width, 1, 0x0a0e20);      /* dark seam shadow */
     char title[32];
     int t = 0;
     put_s(title, &t, "MONITOR ");
     put_s(title, &t, filename);
     title[t] = '\0';
-    api->text(6, 4, title, 0xffffff, 0x222957, 2);
-    api->text((int)width - 150, 8, "UP/DN Q QUIT", 0x9df6ff, 0x222957, 1);
+    label_fg(api, 6, 4, title, 0xffffff, 0x30397e, 2);
+    label_fg(api, (int)width - 150, 8, "UP/DN Q QUIT", 0x9df6ff, 0x30397e, 1);
 
     int code = CART_HEADER_BYTES; /* skip the cart header */
     int y = 30;
@@ -258,9 +288,17 @@ static void draw(const c26_api_t *api)
         format_hex((uint64_t)(0x88000000u + (uint32_t)off), 8, addr);
         format_hex(insn, 8, hx);
         disasm(insn, line);
-        api->text(6, y, addr, 0x6570bd, 0x0b1025, 1);
-        api->text(90, y, hx, 0xbac4ff, 0x0b1025, 1);
-        api->text(180, y, line, 0x68f0c0, 0x0b1025, 2);
+        /* the top-of-view instruction is the current line: gloss-highlight it */
+        uint32_t addr_fg = 0x6570bd, hx_fg = 0xbac4ff, line_fg = 0x68f0c0;
+        if (i == 0) {
+            vgrad(api, 4, y - 2, (int)width - 8, 20, 0x30397e, 0x191f48);
+            api->fill_rect(4, y - 2, (int)width - 8, 1, 0x4653b4);
+            addr_fg = 0xffd34d;
+            hx_fg = 0xffffff;
+        }
+        label_fg(api, 6, y, addr, addr_fg, 0x0c1226, 1);
+        label_fg(api, 90, y, hx, hx_fg, 0x0c1226, 1);
+        label_fg(api, 180, y, line, line_fg, 0x0c1226, 2);
         y += 20;
     }
 }

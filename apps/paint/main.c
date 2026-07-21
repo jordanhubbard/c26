@@ -15,18 +15,47 @@ static const uint32_t palette[8] = {
 static uint32_t width;
 static uint32_t height;
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw_chrome(const c26_api_t *api, unsigned int selected)
 {
-    api->fill_rect(0, 0, (int)width, CANVAS_Y - 2, 0x222957);
-    api->text(4, 4, "PAINT", 0xffffff, 0x222957, 2);
+    /* glossy title + tool bar */
+    vgrad(api, 0, 0, (int)width, CANVAS_Y - 2, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x4a56b4);            /* top highlight */
+    api->fill_rect(0, CANVAS_Y - 3, (int)width, 1, 0x0a0e20); /* seam shadow */
+    label_fg(api, 4, 4, "PAINT", 0xffffff, 0x30397e, 2);
     for (unsigned int i = 0; i < 8; i++) {
         int x = 80 + (int)i * 20;
         api->fill_rect(x, 3, 16, 18, palette[i]);
+        /* subtle bevel: bright top edge, dark bottom edge; colour unchanged */
+        api->fill_rect(x, 3, 16, 1, cmix(palette[i], 0xffffff, 90));
+        api->fill_rect(x, 3 + 18 - 1, 16, 1, cmix(palette[i], 0x000000, 90));
         if (i == selected) {
             api->draw_rect(x - 2, 1, 20, 22, 0xffffff);
         }
     }
-    api->text((int)width - 84, 8, "C CLR Q QUIT", 0x9df6ff, 0x222957, 1);
+    label_fg(api, (int)width - 84, 8, "C CLR Q QUIT", 0x9df6ff, 0x30397e, 1);
 }
 
 static void clear_canvas(const c26_api_t *api)

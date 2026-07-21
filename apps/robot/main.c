@@ -55,27 +55,60 @@ static void bar_rect(int i, int *x, int *y, int *w, int *h)
     *h = rh - 12;
 }
 
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
-    api->fill_rect(0, 0, (int)width, (int)height, 0x0b1025);
-    api->fill_rect(0, 0, (int)width, 24, 0x572222);
-    api->text(6, 4, "ROBOT", 0xffffff, 0x572222, 2);
+    vgrad(api, 0, 0, (int)width, (int)height, 0x141a36, 0x0a0e20);
+    /* glossy title bar: gradient, bright top highlight, dark seam shadow */
+    vgrad(api, 0, 0, (int)width, 24, 0x30397e, 0x191f48);
+    api->fill_rect(0, 0, (int)width, 1, 0x4a56b4);
+    api->fill_rect(0, 23, (int)width, 1, 0x0d1130);
+    label_fg(api, 6, 4, "ROBOT", 0xffffff, 0x30397e, 2);
 
     for (int i = 0; i < CHANNELS; i++) {
         int x, y, w, h;
         bar_rect(i, &x, &y, &w, &h);
 
         int selected = (i == sel);
-        uint32_t label_fg = selected ? 0xffd34d : 0x9fb0d0;
+        uint32_t lbl = selected ? 0xffd34d : 0x9fb0d0;
 
         /* Channel label to the left of its bar. */
-        api->text(6, y + h / 2 - 7, labels[i], label_fg, 0x0b1025, 1);
+        label_fg(api, 6, y + h / 2 - 7, labels[i], lbl, 0x0b1025, 1);
 
-        /* Bar track, then the fill scaled from the 0..255 value. */
-        api->fill_rect(x, y, w, h, 0x1a2140);
+        /* Recessed track gradient with a top seam shadow. */
+        vgrad(api, x, y, w, h, 0x141a36, 0x0a0e20);
+        api->fill_rect(x, y, w, 1, 0x05070f);
+        /* Beveled gauge fill scaled from the 0..255 value. */
         int fill = (int)((uint32_t)chan[i] * (uint32_t)w / 255U);
         uint32_t bar = selected ? 0x68f0c0 : 0x35709a;
-        if (fill > 0) api->fill_rect(x, y, fill, h, bar);
+        if (fill > 0) {
+            vgrad(api, x, y, fill, h, cmix(bar, 0xffffff, 70),
+                  cmix(bar, 0x000000, 60));
+            api->fill_rect(x, y, fill, 1, cmix(bar, 0xffffff, 140));
+            api->fill_rect(x, y + h - 1, fill, 1, cmix(bar, 0x000000, 120));
+        }
 
         /* Highlight the selected channel with an outline. */
         if (selected) api->draw_rect(x - 2, y - 2, w + 4, h + 4, 0xffd34d);
@@ -83,7 +116,7 @@ static void draw(const c26_api_t *api)
         /* Numeric value at the right edge of the bar. */
         char buf[8];
         format_int(chan[i], buf);
-        api->text(x + w - 26, y + h / 2 - 7, buf, 0xffffff, 0x1a2140, 1);
+        label_fg(api, x + w - 26, y + h / 2 - 7, buf, 0xffffff, 0x1a2140, 1);
     }
 }
 

@@ -40,6 +40,13 @@
 #define GRIP 14
 #define MIN_WIN_W 140
 #define MIN_WIN_H 70
+
+/* Launch/close animations, timed off the 100 Hz interrupt tick (10 ms each):
+   a dock-icon bounce when an app launches, a scale-pop as its window opens,
+   and a scale-down as a window closes. */
+#define ANIM_LAUNCH_TICKS 40 /* dock bounce (~0.4s, two decaying hops) */
+#define ANIM_OPEN_TICKS 16   /* window scale-pop (~0.16s) */
+#define ANIM_CLOSE_TICKS 13  /* window shrink (~0.13s) */
 #define MAILBOX_SLOTS 4U
 #define MESSAGE_MAX 240U
 
@@ -128,6 +135,14 @@ static int press_a;    /* app: job index; dock: tile index */
 static int press_b;    /* app/console: dot 0=close 1=min 2=zoom */
 static int ptr_x = -1; /* last pointer position, for hover magnify/highlight */
 static int ptr_y = -1;
+
+/* Launch/close animation state (ticks are the 100 Hz interrupt counter). */
+static uint64_t anim_launch_start;
+static int anim_launch_dock = -1; /* dock tile bouncing on launch, or -1 */
+static uint64_t anim_open_start[C26_NPROC]; /* per-window scale-pop start */
+static uint64_t anim_close_start;
+static int anim_close_active;
+static int anim_close_x, anim_close_y, anim_close_w, anim_close_h;
 
 /* The system clipboard: one shared text buffer any app (or BASIC via
    CLIP/PASTE) reads and writes, so copy/paste crosses the app boundary. */
@@ -599,6 +614,8 @@ static int dock_icon(const char *name, int bx, int by, int s)
     return 0;
 }
 
+static int dock_bounce(uint64_t now); /* defined below, near the anim helpers */
+
 static void dock_draw(void)
 {
     if (dock_count == 0) return;
@@ -618,6 +635,7 @@ static void dock_draw(void)
     /* Magnify icons near the pointer when it is over the dock (macOS genie). */
     int hovering = ptr_y >= dock_top();
     int label_i = -1;
+    int bounce = dock_bounce(c26_interrupt_ticks());
     for (int i = 0; i < dock_count; i++) {
         dock_tile_t *tile = &dock[i];
         int cx = tile->x + DOCK_TILE_W / 2;
@@ -635,7 +653,8 @@ static void dock_draw(void)
         if (pressed) size -= 4;
         int ix = cx - size / 2;
         int iy = panel_y + 6 + (DOCK_ICON - size); /* grow upward, base-aligned */
-        if (iy < panel_y + 2) iy = panel_y + 2;
+        if (i == anim_launch_dock) iy += bounce; /* bounce the launching app */
+        if (iy < panel_y + 2 - 20) iy = panel_y + 2 - 20;
         uint32_t c = dock_palette[i % 8];
         uint32_t top = pressed ? darken(c, 45) : lighten(c, 45);
         uint32_t bot = pressed ? darken(c, 110) : darken(c, 50);
@@ -674,6 +693,46 @@ static int dock_tile_at(int x, int y)
         if (x >= dock[i].x && x < dock[i].x + dock[i].w) return i;
     }
     return -1;
+}
+
+/* The dock tile for a named app, or -1 (used to bounce it on launch). */
+static int dock_index_of(const char *name)
+{
+    for (int i = 0; i < dock_count; i++) {
+        const char *a = dock[i].name, *b = name;
+        while (*a != '\0' && *b != '\0' && *a == *b) { a++; b++; }
+        if (*a == '\0' && *b == '\0') return i;
+    }
+    return -1;
+}
+
+/* The vertical bounce offset (negative = up) for a launching dock icon:
+   two decaying parabolic hops over ANIM_LAUNCH_TICKS. */
+static int dock_bounce(uint64_t now)
+{
+    if (anim_launch_dock < 0) return 0;
+    uint64_t e = now - anim_launch_start;
+    int hp = ANIM_LAUNCH_TICKS / 2; /* ticks per hop */
+    if (e >= (uint64_t)(2 * hp)) return 0;
+    int hop = (int)(e / hp);
+    int lo = (int)(e % hp);
+    int amp = hop == 0 ? 20 : 10; /* second hop is smaller */
+    return -(4 * amp * lo * (hp - lo)) / (hp * hp);
+}
+
+/* True while any launch/open/close animation is still playing, so the
+   compositor keeps repainting frames until it settles. */
+static int anim_running(uint64_t now)
+{
+    if (anim_launch_dock >= 0 && now - anim_launch_start < ANIM_LAUNCH_TICKS)
+        return 1;
+    if (anim_close_active && now - anim_close_start < ANIM_CLOSE_TICKS) return 1;
+    for (int i = 0; i < C26_NPROC; i++) {
+        if (procs[i].state == PROC_RUNNABLE &&
+            now - anim_open_start[i] < ANIM_OPEN_TICKS)
+            return 1;
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -998,6 +1057,38 @@ static void blit_window(const proc_t *process, const uint32_t *surface)
     draw_grip(process->win_x, process->win_y, frame_w, frame_h, is_focused);
 }
 
+/* The window drawn scaled about its centre at pct% (the open-pop animation):
+   a rounded gradient frame plus its content nearest-sampled to size. Chrome
+   detail (dots, title, grip) is skipped until the pop finishes. */
+static void blit_window_scaled(const proc_t *p, const uint32_t *surface, int pct)
+{
+    uint32_t *pixels = c26_framebuffer_pixels();
+    int fw = win_frame_w(p), fh = win_frame_h(p);
+    int sw = fw * pct / 100, sh = fh * pct / 100;
+    int ox = p->win_x + (fw - sw) / 2;
+    int oy = p->win_y + (fh - sh) / 2;
+    fill_round_rect(ox + 4, oy + 5, sw, sh, 8, 0x0a0e20); /* shadow */
+    fill_round_grad(ox, oy, sw, sh, 8, 0x2b3475, 0x141a3c);
+    int cont_x = ox + BORDER * pct / 100;
+    int cont_y = oy + TITLE_HEIGHT * pct / 100;
+    int cont_w = p->win_w * pct / 100, cont_h = p->win_h * pct / 100;
+    for (int yy = 0; yy < cont_h; yy++) {
+        int srcy = yy * 100 / pct;
+        if (srcy >= p->win_h) srcy = p->win_h - 1;
+        int dy = cont_y + yy;
+        if (dy < 0 || dy >= (int)C26_SCREEN_HEIGHT) continue;
+        for (int xx = 0; xx < cont_w; xx++) {
+            int srcx = xx * 100 / pct;
+            if (srcx >= p->win_w) srcx = p->win_w - 1;
+            int dx = cont_x + xx;
+            if (dx < 0 || dx >= (int)C26_SCREEN_WIDTH) continue;
+            pixels[(unsigned int)dy * C26_SCREEN_WIDTH + (unsigned int)dx] =
+                surface[(unsigned int)srcy * C26_SCREEN_WIDTH +
+                        (unsigned int)srcx];
+        }
+    }
+}
+
 void c26_compositor_mark_dirty(void)
 {
     scene_dirty = 1;
@@ -1199,7 +1290,9 @@ void c26_compositor_flush(void)
     if (mode != C26_SCREEN_CONSOLE && mode != C26_SCREEN_CART) {
         return;
     }
-    int damage = scene_dirty || c26_console_dirty();
+    uint64_t now = c26_interrupt_ticks();
+    int animating = anim_running(now);
+    int damage = scene_dirty || c26_console_dirty() || animating;
     for (int i = 0; i < z_count; i++) {
         damage |= procs[z_order[i]].surface_damaged;
     }
@@ -1212,17 +1305,38 @@ void c26_compositor_flush(void)
     draw_wallpaper();
     if (!console_front) draw_console_window();
     for (int i = 0; i < z_count; i++) {
-        proc_t *process = &procs[z_order[i]];
+        int job = z_order[i];
+        proc_t *process = &procs[job];
         process->surface_damaged = 0;
-        blit_window(process, proc_surface[z_order[i]]);
+        uint64_t oe = now - anim_open_start[job];
+        if (oe < ANIM_OPEN_TICKS) { /* window scale-pop on open */
+            int pct = 72 + (int)(28 * oe / ANIM_OPEN_TICKS);
+            blit_window_scaled(process, proc_surface[job], pct);
+        } else {
+            blit_window(process, proc_surface[job]);
+        }
     }
     if (console_front) draw_console_window();
+    /* A closing window shrinks away as a ghost silhouette. */
+    if (anim_close_active) {
+        uint64_t ce = now - anim_close_start;
+        if (ce < ANIM_CLOSE_TICKS) {
+            int pct = 100 - (int)(100 * ce / ANIM_CLOSE_TICKS);
+            int sw = anim_close_w * pct / 100, sh = anim_close_h * pct / 100;
+            int ox = anim_close_x + (anim_close_w - sw) / 2;
+            int oy = anim_close_y + (anim_close_h - sh) / 2;
+            fill_round_grad(ox, oy, sw, sh, 8, 0x3a4488, 0x141a3c);
+        } else {
+            anim_close_active = 0;
+        }
+    }
     if (dock_count > 0) {
         dock_draw();
     }
     draw_menu_bar();
     c26_desktop_draw_pointer();
     c26_framebuffer_present();
+    if (anim_running(now)) scene_dirty = 1; /* keep animation frames coming */
 }
 
 /* Window-manager input, called by the desktop with pointer coordinates. */
@@ -1862,6 +1976,13 @@ void c26_trap_handler_user(c26_user_frame_t *frame)
 
 static void finalize(int index, long code)
 {
+    /* Capture the window box so the compositor can shrink it away as a ghost. */
+    anim_close_x = procs[index].win_x;
+    anim_close_y = procs[index].win_y;
+    anim_close_w = win_frame_w(&procs[index]);
+    anim_close_h = win_frame_h(&procs[index]);
+    anim_close_start = c26_interrupt_ticks();
+    anim_close_active = 1;
     procs[index].state = PROC_FREE;
     procs[index].kill_pending = 0;
     z_remove(index);
@@ -1965,6 +2086,11 @@ int c26_cart_run(const char *name)
     c26_put_uint((uint64_t)slot);
     c26_putc('\n');
     focus_proc(slot);
+    /* Launch animations: the window scales open and the dock icon bounces. */
+    uint64_t now = c26_interrupt_ticks();
+    anim_open_start[slot] = now;
+    anim_launch_dock = dock_index_of(name);
+    anim_launch_start = now;
     return slot;
 }
 

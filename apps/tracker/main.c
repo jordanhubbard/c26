@@ -25,30 +25,74 @@ static const char *note_names[12] = {
     "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-",
 };
 
+/* Per-voice hues for lit step cells, so each row reads as its own timbre. */
+static const uint32_t voice_hue[VOICES] = {
+    0x2f9a54, 0x2f8a9a, 0x3f5ab4, 0x7a46b4,
+    0xb44688, 0xb46a34, 0x9aa030, 0x46b46a,
+};
+
+static uint32_t cmix(uint32_t a, uint32_t b, int t)
+{
+    int ra = (a >> 16) & 255, ga = (a >> 8) & 255, ba = a & 255;
+    int rb = (b >> 16) & 255, gb = (b >> 8) & 255, bb = b & 255;
+    return ((uint32_t)(ra + (rb - ra) * t / 256) << 16) |
+           ((uint32_t)(ga + (gb - ga) * t / 256) << 8) |
+           (uint32_t)(ba + (bb - ba) * t / 256);
+}
+static void vgrad(const c26_api_t *api, int x, int y, int w, int h, uint32_t top,
+                  uint32_t bot)
+{
+    for (int i = 0; i < h; i++)
+        api->fill_rect(x, y + i, w, 1, cmix(top, bot, i * 256 / (h > 0 ? h : 1)));
+}
+static void label_fg(const c26_api_t *api, int x, int y, const char *s,
+                     uint32_t fg, uint32_t bg, int scale)
+{
+    if (api->version >= 6)
+        api->text_fg(x, y, s, fg, (unsigned int)scale);
+    else
+        api->text(x, y, s, fg, bg, scale);
+}
+
 static void draw(const c26_api_t *api)
 {
     ui_clear(&ui);
+    /* glossy backdrop behind the grid, matching the desktop's Aqua wash */
+    vgrad(api, 0, 0, (int)ui.width, (int)ui.height, 0x141a36, 0x0b1025);
     ui_titlebar(&ui, "TRACKER", "SPC PLAY  A/Z NOTE  ^S SAVE  Q QUIT");
     for (int voice = 0; voice < VOICES; voice++) {
         int y = 42 + voice * 34;
+        uint32_t vh = voice_hue[voice];
         char label[4] = {'V', (char)('0' + voice), 0, 0};
-        api->text(8, y + 6, label, UI_TEXT, UI_BG, 2);
+        /* voice chip: beveled gradient tag in the voice's hue */
+        vgrad(api, 4, y, 34, 30, cmix(vh, 0xffffff, 55), cmix(vh, 0x000000, 70));
+        api->fill_rect(4, y, 34, 1, cmix(vh, 0xffffff, 140));
+        api->fill_rect(4, y + 29, 34, 1, cmix(vh, 0x000000, 150));
+        label_fg(api, 8, y + 6, label, 0xffffff, vh, 2);
         for (int step = 0; step < STEPS; step++) {
             int x = 44 + step * 48;
-            uint32_t bg = UI_BG;
-            if (playing && step == play_step) bg = 0x2c5a3c;
-            if (voice == cursor_voice && step == cursor_step) bg = UI_ACCENT;
-            api->fill_rect(x, y, 44, 30, bg);
             uint8_t note = grid[voice][step];
+            int is_cursor = (voice == cursor_voice && step == cursor_step);
+            int is_play = (playing && step == play_step);
+            /* lit steps glow in the voice hue; empty steps stay a dark panel */
+            uint32_t base = note != 0 ? vh : 0x141a36;
+            if (is_play) base = cmix(base, 0xffffff, 55); /* playhead glow */
+            if (is_cursor) base = 0x4653b4;               /* cursor accent */
+            uint32_t top = cmix(base, 0xffffff, is_cursor ? 90 : 60);
+            uint32_t bot = cmix(base, 0x000000, 60);
+            vgrad(api, x, y, 44, 30, top, bot);
+            api->fill_rect(x, y, 44, 2, cmix(base, 0xffffff, 130));     /* highlight */
+            api->fill_rect(x, y + 29, 44, 1, cmix(base, 0x000000, 150)); /* seam */
             if (note != 0) {
                 char cell[4];
                 cell[0] = note_names[(note - 1) % 12][0];
                 cell[1] = note_names[(note - 1) % 12][1];
                 cell[2] = (char)('3' + (note - 1) / 12);
                 cell[3] = '\0';
-                api->text(x + 4, y + 7, cell, UI_BRIGHT, bg, 2);
+                label_fg(api, x + 4, y + 7, cell, 0xffffff, base, 2);
             } else {
-                api->text(x + 10, y + 7, "..", 0x505a8c, bg, 2);
+                label_fg(api, x + 10, y + 7, "..",
+                         is_cursor ? 0xdfe4ff : 0x6a76b0, base, 2);
             }
         }
     }
