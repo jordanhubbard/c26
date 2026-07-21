@@ -26,7 +26,7 @@ FIRST_BOOT_MARKERS = [
     "VIRTIO BLOCK: 16384 sectors online",
     "C26FS: formatted new disk",
     "C26FS: mounted 0 file(s)",
-    "FRAMEBUFFER: virtio-gpu scanout 1920x1080x32",
+    "FRAMEBUFFER: virtio-gpu scanout 2560x1440x32",
     "VIRTIO INPUT: 2 device(s) online",
     "VIRTIO NET: online 10.0.2.15",
     "UDP ECHO SERVICE: port 2600",

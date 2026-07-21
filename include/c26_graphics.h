@@ -5,10 +5,10 @@
 
 /* Native scanout resolution. The kernel keeps a full-screen framebuffer plus
    one per-process compositing surface (see SURFACE_PIXELS in cart.c); at
-   1920x1080x32 that is ~8 MiB each, and the kernel's static surfaces total
-   ~42 MiB — well under the 128 MiB below the cartridge base at 0x88000000. */
-#define C26_SCREEN_WIDTH 1920U
-#define C26_SCREEN_HEIGHT 1080U
+   2560x1440x32 that is ~15 MiB each, and the kernel's static surfaces total
+   ~74 MiB — still under the 128 MiB below the cartridge base at 0x88000000. */
+#define C26_SCREEN_WIDTH 2560U
+#define C26_SCREEN_HEIGHT 1440U
 
 typedef struct {
     int32_t x;

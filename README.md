@@ -85,7 +85,7 @@ host operating system.
 - Power control from inside the machine: `BYE`/`EXIT`/`QUIT`/`SHUTDOWN`
   say goodbye and power off through QEMU virt's SiFive test finisher;
   `HALT` is the blunt debug variant — immediate exit, no ceremony.
-- 1920x1080 32-bit virtio-GPU scanout with software-buffer fallback, rendering
+- 2560x1440 32-bit virtio-GPU scanout with software-buffer fallback, rendering
   a scrolling text console with a full printable-ASCII 5x7 font.
 - The machine boots to the BASIC console; Esc opens a desktop launcher with
   keyboard selection, mouse pointer, and BASIC, file-browser, robot, network,

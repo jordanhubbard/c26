@@ -37,7 +37,7 @@ the smoke gate. Single-process by design at this stage.
 ## Delivered: M4a — multiprocessing + compositor core (2026-07-17)
 
 Four concurrent U-mode processes in round-robin slices, each with its own
-Sv39 space (same link VA, different physical slot) and its own 1920x1080
+Sv39 space (same link VA, different physical slot) and its own 2560x1440
 surface. The compositor shows the focused surface with a status bar; Tab /
 Ctrl-T switch focus while everything keeps running; JOBS and KILL manage
 jobs from BASIC; apps/ticker's heartbeat interleaving with console output is
