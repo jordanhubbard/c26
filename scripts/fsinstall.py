@@ -16,12 +16,16 @@ from pathlib import Path
 
 SECTOR = 512
 MAGIC = 0x46363243  # 'C26F'
-VERSION = 2
+VERSION = 3
 DIR_START = 1
 DIR_SECTORS = 4
 MAP_START = 5
 MAP_SECTORS = 4
-DATA_START = 9
+# sector 9 = write-ahead log header, sectors 10-18 = staged metadata (see
+# src/fs.c). Data starts after the log region. A fresh installer image leaves
+# the log header zeroed, which the guest treats as "no transaction to replay".
+LOG_START = 9
+DATA_START = 19
 FILE_COUNT = 64
 NAME_MAX = 15
 FILE_MAX = 128 * 1024

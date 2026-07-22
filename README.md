@@ -22,10 +22,15 @@ host operating system.
   and defer process teardown to hart 0. The smoke gate boots with two harts and
   asserts an app actually executed on the second core.
 - Modern virtio-MMIO transport shared by block, GPU, input, and sound drivers.
-- A persistent 8 MiB raw virtio-block disk with C26FS v2: 64 checksummed
+- A persistent 8 MiB raw virtio-block disk with C26FS v3: 64 checksummed
   files up to 128 KiB, a free-sector allocation bitmap, and DELETE/RENAME.
   New disks format automatically, existing disks mount at boot, and a fresh
-  machine installs a `DEMO` program written in BASIC.
+  machine installs a `DEMO` program written in BASIC. Writes are **crash-safe**:
+  metadata updates go through a write-ahead log (stage → commit → install →
+  clear, replayed on the next mount after a crash) and file data is
+  copy-on-write, so a power loss mid-save leaves either the whole old file or
+  the whole new one — never a corrupted one. Host `test_fs` gates recovery of a
+  committed transaction and the atomicity of an uncommitted one.
 - A cartridge port: apps are flat RV64 binaries in C26FS, compiled out of
   tree against the frozen `include/c26_api.h` vector table and launched with
   `RUN "NAME"`. `apps/paint` ships as the first cartridge (mouse draws, 1-8

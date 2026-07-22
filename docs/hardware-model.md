@@ -25,7 +25,7 @@ replacing magic memory addresses with typed SDK calls.
 | --- | --- |
 | CPU | SMP RV64IMAC (default 2 harts, -smp N); hart 0 owns UI/devices, secondaries run apps |
 | Interrupts | CLINT timer and PLIC-routed UART/virtio IRQs; WFI idle |
-| Storage | 8 MiB virtio-block disk; C26FS v2: 64 files, 128 KiB, delete/rename |
+| Storage | 8 MiB virtio-blk; C26FS v3 (64 files, bitmap, crash-safe write-ahead log + copy-on-write data) |
 | Cartridges | Flat RV64 binaries from C26FS via the c26_api.h vector table |
 | Protection | U-mode + Sv39 per cartridge; 25-syscall surface; preemptive kill |
 | Multitasking | 4 concurrent processes, round-robin slices, JOBS/KILL |

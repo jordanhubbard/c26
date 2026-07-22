@@ -2,22 +2,35 @@
 #include "c26_block.h"
 #include "c26_fs.h"
 
-/* C26FS v2 on-disk layout (512-byte sectors):
+/* C26FS v3 on-disk layout (512-byte sectors):
  *   sector 0      superblock (holds directory + bitmap checksums)
  *   sectors 1-4   directory: 64 entries x 32 bytes
  *   sectors 5-8   allocation bitmap: one bit per disk sector
- *   sectors 9+    file data, contiguous first-fit extents
+ *   sector 9      write-ahead log header (commit record)
+ *   sectors 10-18 log data: the 9 metadata blocks staged for a transaction
+ *   sectors 19+   file data, contiguous first-fit extents
  * scripts/fsinstall.py implements the same layout host-side; keep them in
  * sync.
+ *
+ * Crash safety: metadata updates (directory + bitmap + superblock, 9 sectors)
+ * are made atomic by a write-ahead log — stage the blocks in the log, write a
+ * committed header, install to home, clear the header. A crash replays a
+ * committed log on the next mount. File data is copy-on-write (a save always
+ * writes a fresh extent and only the committed metadata switch makes it live),
+ * so a crash leaves either the whole old file or the whole new one.
  */
 
 #define C26_FS_MAGIC 0x46363243U /* 'C26F' */
-#define C26_FS_VERSION 2U
+#define C26_FS_VERSION 3U
 #define C26_FS_DIR_START 1U
 #define C26_FS_DIR_SECTORS 4U
 #define C26_FS_MAP_START 5U
 #define C26_FS_MAP_SECTORS 4U
-#define C26_FS_DATA_START 9U
+#define C26_FS_LOG_START 9U       /* commit-record header */
+#define C26_FS_LOG_DATA 10U       /* 9 staged metadata blocks: 10..18 */
+#define C26_FS_LOG_BLOCKS 9U      /* dir(4) + map(4) + super(1) */
+#define C26_FS_DATA_START 19U
+#define C26_FS_LOG_MAGIC 0x474f4c43U /* 'CLOG' */
 #define C26_FS_MAP_BYTES (C26_FS_MAP_SECTORS * C26_BLOCK_SECTOR_SIZE)
 
 typedef struct {
@@ -45,9 +58,25 @@ typedef struct {
     uint32_t checksum;
 } fs_entry_t;
 
+/* The log commit record (one sector): a committed transaction lists the home
+   sector of each staged block so the mount-time replay can install them. */
+typedef struct {
+    uint32_t magic;
+    uint32_t committed; /* 1 = replay on mount, 0 = ignore */
+    uint32_t count;     /* number of staged blocks */
+    uint32_t targets[C26_FS_LOG_BLOCKS]; /* home sector of each staged block */
+    uint8_t reserved[C26_BLOCK_SECTOR_SIZE - 12 - 4 * C26_FS_LOG_BLOCKS];
+} fs_log_header_t;
+
 _Static_assert(sizeof(fs_superblock_t) == C26_BLOCK_SECTOR_SIZE,
                "superblock must fill one sector");
+_Static_assert(sizeof(fs_log_header_t) == C26_BLOCK_SECTOR_SIZE,
+               "log header must fill one sector");
 _Static_assert(sizeof(fs_entry_t) == 32, "directory entry must be 32 bytes");
+
+/* Test hook (host test_fs.c sets this): 1 = simulate a crash after the log
+   commits but before install; 2 = before the commit. Zero in the real machine. */
+static int fs_test_crash;
 _Static_assert(sizeof(fs_entry_t) * C26_FS_FILE_COUNT ==
                    C26_FS_DIR_SECTORS * C26_BLOCK_SECTOR_SIZE,
                "directory must fill its sectors exactly");
@@ -175,15 +204,76 @@ static int write_sectors(uint32_t start, uint32_t count, const void *data)
     return 1;
 }
 
+/* Write the one-sector log header. committed=0 leaves an inert (empty) log. */
+static int write_log_header(int committed)
+{
+    memset(sector_buffer, 0, sizeof(sector_buffer));
+    fs_log_header_t *h = (fs_log_header_t *)(void *)sector_buffer;
+    h->magic = C26_FS_LOG_MAGIC;
+    h->committed = (uint32_t)committed;
+    if (committed) {
+        h->count = C26_FS_LOG_BLOCKS;
+        for (uint32_t i = 0; i < C26_FS_DIR_SECTORS; i++)
+            h->targets[i] = C26_FS_DIR_START + i;
+        for (uint32_t i = 0; i < C26_FS_MAP_SECTORS; i++)
+            h->targets[C26_FS_DIR_SECTORS + i] = C26_FS_MAP_START + i;
+        h->targets[C26_FS_LOG_BLOCKS - 1] = 0; /* superblock */
+    }
+    return c26_block_write(C26_FS_LOG_START, sector_buffer) && c26_block_flush();
+}
+
+/* Atomically update the metadata (directory, bitmap, superblock) through the
+   write-ahead log: stage -> commit -> install -> clear. A crash after the
+   commit is repaired by replay_log() on the next mount. */
 static int write_metadata(void)
 {
     superblock.generation++;
     superblock.dir_checksum = checksum_bytes(directory, sizeof(directory));
     superblock.map_checksum = checksum_bytes(bitmap, sizeof(bitmap));
     superblock.checksum = super_checksum();
-    return write_sectors(C26_FS_DIR_START, C26_FS_DIR_SECTORS, directory) &&
-           write_sectors(C26_FS_MAP_START, C26_FS_MAP_SECTORS, bitmap) &&
-           c26_block_write(0, &superblock) && c26_block_flush();
+
+    /* 1. Stage the 9 metadata blocks into the log data region. */
+    if (!write_sectors(C26_FS_LOG_DATA, C26_FS_DIR_SECTORS, directory) ||
+        !write_sectors(C26_FS_LOG_DATA + C26_FS_DIR_SECTORS, C26_FS_MAP_SECTORS,
+                       bitmap) ||
+        !c26_block_write(C26_FS_LOG_DATA + C26_FS_LOG_BLOCKS - 1, &superblock) ||
+        !c26_block_flush()) {
+        return 0;
+    }
+    if (fs_test_crash == 2) { fs_test_crash = 0; return 0; } /* crash pre-commit */
+
+    /* 2. Commit. */
+    if (!write_log_header(1)) return 0;
+    if (fs_test_crash == 1) { fs_test_crash = 0; return 0; } /* crash post-commit */
+
+    /* 3. Install to home. */
+    if (!write_sectors(C26_FS_DIR_START, C26_FS_DIR_SECTORS, directory) ||
+        !write_sectors(C26_FS_MAP_START, C26_FS_MAP_SECTORS, bitmap) ||
+        !c26_block_write(0, &superblock) || !c26_block_flush()) {
+        return 0;
+    }
+
+    /* 4. Clear the log. */
+    return write_log_header(0);
+}
+
+/* On mount, install any committed-but-not-cleared transaction (a crash between
+   commit and clear), then blank the log. Idempotent — replaying twice is safe. */
+static void replay_log(void)
+{
+    if (!c26_block_read(C26_FS_LOG_START, sector_buffer)) return;
+    fs_log_header_t header = *(fs_log_header_t *)(void *)sector_buffer;
+    if (header.magic != C26_FS_LOG_MAGIC || header.committed != 1 ||
+        header.count > C26_FS_LOG_BLOCKS) {
+        return;
+    }
+    for (uint32_t i = 0; i < header.count; i++) {
+        if (!c26_block_read(C26_FS_LOG_DATA + i, sector_buffer)) return;
+        if (!c26_block_write(header.targets[i], sector_buffer)) return;
+    }
+    c26_block_flush();
+    write_log_header(0);
+    c26_puts("C26FS: recovered from log\n");
 }
 
 static int format_filesystem(void)
@@ -250,6 +340,7 @@ int c26_fs_init(void)
         c26_puts("C26FS: no block device\n");
         return 0;
     }
+    replay_log(); /* repair a metadata transaction interrupted by a crash */
     if (!c26_block_read(0, &superblock) ||
         !read_sectors(C26_FS_DIR_START, C26_FS_DIR_SECTORS, directory) ||
         !read_sectors(C26_FS_MAP_START, C26_FS_MAP_SECTORS, bitmap) ||
@@ -312,15 +403,16 @@ int c26_fs_save(const char *name, const void *data, size_t size)
         memcpy(entry->name, name, name_length);
     }
 
+    /* Copy-on-write: always write the new contents to a fresh extent and only
+       switch the directory entry to it after the metadata transaction commits.
+       The old extent stays intact until then, so a crash leaves either the
+       whole old file or the whole new one — never a half-written one. */
     uint32_t old_start = entry->start_sector;
     uint32_t old_count = entry->sector_count;
-    uint32_t start = old_start;
-    if (sectors > old_count) {
-        start = alloc_run(sectors);
-        if (start == 0) {
-            if (entry->size == 0) entry->name[0] = '\0';
-            return 0;
-        }
+    uint32_t start = alloc_run(sectors);
+    if (start == 0) {
+        if (entry->size == 0) entry->name[0] = '\0'; /* undo a fresh slot */
+        return 0;
     }
 
     const uint8_t *bytes = data;
@@ -332,17 +424,15 @@ int c26_fs_save(const char *name, const void *data, size_t size)
                        C26_BLOCK_SECTOR_SIZE : remaining;
         memcpy(sector_buffer, bytes + offset, chunk);
         if (!c26_block_write(start + sector, sector_buffer)) {
-            if (start != old_start) mark_run(start, sectors, 0);
+            mark_run(start, sectors, 0);
             if (entry->size == 0) entry->name[0] = '\0';
             return 0;
         }
     }
 
-    if (start != old_start) {
-        if (old_count != 0) mark_run(old_start, old_count, 0);
-        entry->start_sector = start;
-        entry->sector_count = sectors;
-    }
+    if (old_count != 0) mark_run(old_start, old_count, 0);
+    entry->start_sector = start;
+    entry->sector_count = sectors;
     entry->size = (uint32_t)size;
     entry->checksum = checksum_bytes(data, size);
     return write_metadata();

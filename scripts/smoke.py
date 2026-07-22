@@ -722,7 +722,8 @@ def main() -> int:
 
     print("c26 smoke passed: BASIC + a built-in Scheme REPL (call/cc, a "
           "higher-order DEMO.SCM driving the desktop), graphics, sound, "
-          "C26FS v2, two-boot persistence, multiprocessing U-mode cartridges "
+          "C26FS v3 (crash-safe write-ahead log), two-boot persistence, "
+          "multiprocessing U-mode cartridges "
           "(contained fault, preemptive kill, concurrent job), windows + "
           "IPC with resize/minimize/close window management, a graphical dock "
           "launching apps through synthetic pointer clicks, and a shared "

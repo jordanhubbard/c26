@@ -101,6 +101,36 @@ int main(void)
     expect(!c26_fs_load("DELTA", buffer, sizeof(buffer), &size),
            "corruption detected");
 
+    /* Crash safety: a transaction that commits its log then crashes before
+       installing must be recovered (replayed) on the next mount. */
+    shim_disk_reset();
+    shim_output_reset();
+    expect(c26_fs_init(), "recovery: fresh disk");
+    expect(c26_fs_save("REC", "AAAA", 4), "recovery: save v1");
+    fs_test_crash = 1; /* crash after commit, before install */
+    expect(!c26_fs_save("REC", "BBBB", 4), "recovery: save v2 crashes");
+    expect(c26_fs_init(), "recovery: remount replays");
+    expect(strstr(shim_output, "recovered from log") != NULL,
+           "recovery: replay announced");
+    expect(c26_fs_load("REC", buffer, sizeof(buffer), &size) && size == 4 &&
+               memcmp(buffer, "BBBB", 4) == 0,
+           "recovery: committed write survived the crash");
+
+    /* And a transaction that crashes BEFORE committing must leave the old file
+       wholly intact — no half-write, no corruption. */
+    shim_disk_reset();
+    shim_output_reset();
+    expect(c26_fs_init(), "atomicity: fresh disk");
+    expect(c26_fs_save("REC", "AAAA", 4), "atomicity: save v1");
+    fs_test_crash = 2; /* crash before commit */
+    expect(!c26_fs_save("REC", "BBBB", 4), "atomicity: save v2 crashes");
+    expect(c26_fs_init(), "atomicity: remount");
+    expect(strstr(shim_output, "recovered from log") == NULL,
+           "atomicity: nothing to replay");
+    expect(c26_fs_load("REC", buffer, sizeof(buffer), &size) && size == 4 &&
+               memcmp(buffer, "AAAA", 4) == 0,
+           "atomicity: old file intact after uncommitted crash");
+
     if (failures == 0) {
         printf("test_fs: all assertions passed\n");
         return 0;
