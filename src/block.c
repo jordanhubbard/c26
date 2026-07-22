@@ -9,6 +9,12 @@
 #define VIRTIO_BLK_T_FLUSH 4U
 #define VIRTIO_BLK_S_OK 0U
 
+/* Completion wait: BLOCK_WAIT_POLL quick used-ring polls catch the common
+   instant completion; otherwise WFI sleeps the core until the disk IRQ or the
+   next timer tick, up to BLOCK_WAIT_SLEEPS times (~seconds) before giving up. */
+#define BLOCK_WAIT_POLL 4096
+#define BLOCK_WAIT_SLEEPS 1024U
+
 typedef struct {
     uint32_t type;
     uint32_t reserved;
@@ -52,12 +58,21 @@ static int submit(uint32_t type, uint64_t sector, void *buffer,
         C26_VIRTQ_DESC_WRITE, 0};
     c26_virtq_submit(&block_queue, 0);
 
+    /* Wait for the device to post completion in the used ring. Rather than
+       burn the core (and, under SMP, hold the big kernel lock) in a spin, we
+       poll briefly to catch the common instant completion, then WFI to sleep
+       until the virtio-blk interrupt — or, as a fallback, the next timer tick —
+       wakes the hart, and re-check. `sleeps` bounds the wait so a dead device
+       can't hang the machine. */
     uint32_t id;
-    for (uint32_t spin = 0; spin < 50000000U; spin++) {
-        if (c26_virtq_pop(&block_queue, &id, 0)) {
-            c26_virtio_ack_interrupt(&block_device);
-            return id == 0 && request_status == VIRTIO_BLK_S_OK;
+    for (unsigned int sleeps = 0; sleeps < BLOCK_WAIT_SLEEPS; sleeps++) {
+        for (int quick = 0; quick < BLOCK_WAIT_POLL; quick++) {
+            if (c26_virtq_pop(&block_queue, &id, 0)) {
+                c26_virtio_ack_interrupt(&block_device);
+                return id == 0 && request_status == VIRTIO_BLK_S_OK;
+            }
         }
+        __asm__ volatile("wfi");
     }
     return 0;
 }
