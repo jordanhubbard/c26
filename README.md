@@ -227,7 +227,7 @@ variables with a full-screen editor.
 
 ### The continuing adventures of Jordan Hubbard and Sir Reginald von Fluffington III
 
-> *Part 19 of an ongoing chronicle. [← Part 18: mac](https://github.com/jordanhubbard/mac#the-totally-true-and-not-at-all-embellished-history-of-mac) | [Part 20: Orca-Flashforge →](https://github.com/jordanhubbard/Orca-Flashforge#the-totally-true-and-not-at-all-embellished-history-of-orca-flashforge)*
+> *Part 19 of an ongoing chronicle. [← Part 18: mac](https://github.com/jordanhubbard/mac#the-totally-true-and-not-at-all-embellished-history-of-mac)*
 > *[Chronicle index](https://github.com/jordanhubbard/ai-template/blob/main/CHRONICLE.md) · Ordered by first recorded AI-assisted commit.*
 
 The programmer remembered computers that started with a prompt and an invitation to write a program.
