@@ -221,3 +221,35 @@ behavior available without a host graphics API.
 `docs/roadmap.md` records the forward course: honest virtio-net networking,
 C26FS growth, user C program loading, host-side unit tests, and BASIC string
 variables with a full-screen editor.
+
+<!-- ai-template:narrative:start -->
+## The Totally True and Not At All Embellished History of c26
+
+### The continuing adventures of Jordan Hubbard and Sir Reginald von Fluffington III
+
+> *Part 19 of an ongoing chronicle. [← Part 18: mac](https://github.com/jordanhubbard/mac#the-totally-true-and-not-at-all-embellished-history-of-mac) | [Part 20: Orca-Flashforge →](https://github.com/jordanhubbard/Orca-Flashforge#the-totally-true-and-not-at-all-embellished-history-of-orca-flashforge)*
+> *[Chronicle index](https://github.com/jordanhubbard/ai-template/blob/main/CHRONICLE.md) · Ordered by first recorded AI-assisted commit.*
+
+The programmer remembered computers that started with a prompt and an invitation to write a program.
+
+Sir Reginald von Fluffington III remembered the last time the programmer had said “computers used to be simpler.” It had ended with several new repositories.
+
+“A home computer for 2026,” the programmer said. “RISC-V. BASIC. Turn it on and do something.”
+
+c26 would boot directly on QEMU's `virt` machine. The target would be freestanding C and assembly. There would be no host operating system beneath the image to quietly perform the difficult parts while the project took credit for their absence.
+
+The BASIC console acquired line numbers, expressions, control flow, and hardware statements. Programs needed somewhere to live, so the computer acquired a filesystem. Saving needed to survive an interruption, so the filesystem acquired a write-ahead log and copy-on-write file data. Sir Reginald supplied an interruption by stepping onto the power strip; the programmer declined to accept this as a test plan.
+
+Then came cartridges: applications compiled against a defined API, stored on disk, and launched by name. Memory protection kept an errant application from taking the machine with it. A spinning program could be interrupted. Multiple RISC-V harts could run application work while the interactive machine continued responding.
+
+The programmer had wanted a prompt. He now also had a desktop.
+
+There were windows, a dock, a paint program, a spreadsheet, a sequencer, and games. A two-pass assembler let the machine turn assembly source into another cartridge. The phrase “instant-on home computer” had proved surprisingly capacious.
+
+Sir Reginald followed the magnifying dock icons with a professional hunter's attention. He found their lack of physical existence a breach of the implied contract.
+
+“It still starts with something you can use,” the programmer said. “You can make the next program on the machine itself.”
+
+Sir Reginald pressed a paw onto the keyboard, contributing an unnumbered BASIC statement of doubtful syntax. The programmer called the whole arrangement elegant. The cat withheld endorsement until `LOAD` could retrieve dinner.
+
+<!-- ai-template:narrative:end -->
